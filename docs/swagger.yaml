@@ -1,0 +1,1279 @@
+basePath: /api/v1
+definitions:
+  gorm.DeletedAt:
+    properties:
+      time:
+        type: string
+      valid:
+        description: Valid is true if Time is not NULL
+        type: boolean
+    type: object
+  models.Friend:
+    properties:
+      createdAt:
+        type: string
+      friend:
+        $ref: '#/definitions/models.User'
+      friendID:
+        description: 好友 ID
+        type: integer
+      groupName:
+        description: 分组名
+        type: string
+      id:
+        type: integer
+      indexes:
+        description: 复合索引
+        items: {}
+        type: array
+      isMuted:
+        description: 是否免打扰
+        type: boolean
+      isStar:
+        description: 是否星标好友
+        type: boolean
+      remark:
+        description: 备注
+        type: string
+      status:
+        description: '状态: 1-正常 2-拉黑'
+        type: integer
+      updatedAt:
+        type: string
+      user:
+        allOf:
+        - $ref: '#/definitions/models.User'
+        description: 关联关系
+      userID:
+        description: 用户 ID
+        type: integer
+    type: object
+  models.FriendApply:
+    properties:
+      createdAt:
+        type: string
+      from_user:
+        description: 申请用户 ID
+        type: integer
+      fromUser:
+        allOf:
+        - $ref: '#/definitions/models.User'
+        description: 关联关系
+      id:
+        type: integer
+      processedAt:
+        description: 处理时间
+        type: string
+      reason:
+        description: 申请理由
+        type: string
+      remark:
+        description: 备注
+        type: string
+      reply:
+        description: 回复消息
+        type: string
+      status:
+        description: '状态: 0-待处理 1-同意 2-拒绝'
+        type: integer
+      to_user:
+        description: 目标用户 ID
+        type: integer
+      toUser:
+        $ref: '#/definitions/models.User'
+      updatedAt:
+        type: string
+    type: object
+  models.Message:
+    properties:
+      content:
+        description: 消息内容
+        type: string
+      createdAt:
+        type: string
+      deletedAt:
+        $ref: '#/definitions/gorm.DeletedAt'
+      extra:
+        description: 扩展信息
+        type: string
+      id:
+        type: integer
+      isEncrypted:
+        description: 是否加密
+        type: boolean
+      isSystem:
+        description: 是否为系统消息
+        type: boolean
+      messageID:
+        description: 对外消息 ID
+        type: string
+      replyTo:
+        $ref: '#/definitions/models.Message'
+      replyToMsgID:
+        description: 回复的消息 ID
+        type: integer
+      room:
+        allOf:
+        - $ref: '#/definitions/models.Room'
+        description: 关联关系
+      roomID:
+        description: 房间 ID
+        type: integer
+      sender:
+        $ref: '#/definitions/models.User'
+      senderID:
+        description: 发送者 ID
+        type: integer
+      status:
+        description: '状态: 0-发送中 1-已发送 2-已送达 3-已读 4-撤回（会在聊天窗口留下痕迹） 5-删除（自己不可见） 6/7-双删（Sender/非Sender删除)在私聊中互相可以删除，但在群中你只能删除自己的，已经管理员进行删除'
+        type: integer
+      type:
+        description: '消息类型: 1-文本 2-图片 3-语音 4-视频 5-文件 6-位置'
+        type: integer
+      updatedAt:
+        type: string
+    type: object
+  models.Room:
+    properties:
+      avatar:
+        description: 房间头像
+        type: string
+      createdAt:
+        type: string
+      creator:
+        allOf:
+        - $ref: '#/definitions/models.User'
+        description: 关联关系
+      creatorID:
+        description: 创建者 ID
+        type: integer
+      deletedAt:
+        $ref: '#/definitions/gorm.DeletedAt'
+      description:
+        description: 描述
+        type: string
+      id:
+        type: integer
+      isEncrypted:
+        description: 是否端到端加密
+        type: boolean
+      memberLimit:
+        description: 成员上限
+        type: integer
+      messages:
+        items:
+          $ref: '#/definitions/models.Message'
+        type: array
+      name:
+        description: 房间名称
+        type: string
+      roomID:
+        description: 对外房间 ID
+        type: string
+      roomUsers:
+        items:
+          $ref: '#/definitions/models.RoomUser'
+        type: array
+      type:
+        description: '类型: 1-私聊 2-群聊'
+        type: integer
+      updatedAt:
+        type: string
+    type: object
+  models.RoomUser:
+    properties:
+      createdAt:
+        type: string
+      id:
+        type: integer
+      isMuted:
+        description: 是否被禁言
+        type: boolean
+      joinSource:
+        description: 加入来源
+        type: string
+      joinTime:
+        description: 加入时间
+        type: string
+      mutedUntil:
+        description: 禁言截止时间
+        type: string
+      nickname:
+        description: 在群里的昵称
+        type: string
+      role:
+        description: '角色: 0-普通成员 1-管理员 2-群主'
+        type: integer
+      room:
+        allOf:
+        - $ref: '#/definitions/models.Room'
+        description: 关联关系
+      roomID:
+        description: 房间 ID
+        type: integer
+      updatedAt:
+        type: string
+      user:
+        $ref: '#/definitions/models.User'
+      userID:
+        description: 用户 ID
+        type: integer
+    type: object
+  models.User:
+    properties:
+      avatar:
+        description: 头像
+        type: string
+      birthday:
+        description: 生日
+        type: string
+      createdAt:
+        type: string
+      deletedAt:
+        $ref: '#/definitions/gorm.DeletedAt'
+      email:
+        description: 邮箱
+        type: string
+      friendApplys:
+        items:
+          $ref: '#/definitions/models.FriendApply'
+        type: array
+      friends:
+        description: 关联关系
+        items:
+          $ref: '#/definitions/models.Friend'
+        type: array
+      gender:
+        description: '性别: 0-未知 1-男 2-女'
+        type: integer
+      id:
+        type: integer
+      lastActiveAt:
+        description: 最后活跃时间
+        type: string
+      lastLoginAt:
+        description: 最后登录时间
+        type: string
+      messages:
+        items:
+          $ref: '#/definitions/models.Message'
+        type: array
+      nickname:
+        description: 昵称
+        type: string
+      onlineStatus:
+        description: '在线状态: 0-离线 1-在线'
+        type: integer
+      password:
+        description: 密码
+        type: string
+      phone:
+        description: 手机号
+        type: string
+      rooms:
+        items:
+          $ref: '#/definitions/models.RoomUser'
+        type: array
+      signature:
+        description: 个性签名
+        type: string
+      uid:
+        description: 对外用户 ID
+        type: string
+      updatedAt:
+        type: string
+      username:
+        description: 用户名
+        type: string
+    type: object
+  response.Response:
+    properties:
+      code:
+        description: 业务状态码
+        example: 0
+        type: integer
+      data:
+        description: 响应数据
+        type: object
+      msg:
+        description: 提示消息
+        example: success
+        type: string
+    type: object
+  service.LoginReq:
+    properties:
+      account:
+        description: username/phone/email
+        type: string
+      password:
+        description: plaintext
+        type: string
+    type: object
+  service.LoginResp:
+    properties:
+      token:
+        type: string
+      user:
+        $ref: '#/definitions/service.UserDTO'
+    type: object
+  service.MessageDTO:
+    properties:
+      content:
+        type: string
+      created_at:
+        type: string
+      extra:
+        type: string
+      id:
+        type: integer
+      is_encrypted:
+        type: boolean
+      is_system:
+        type: boolean
+      message_id:
+        type: string
+      reply_to_msg_id:
+        type: integer
+      room_id:
+        type: integer
+      sender_id:
+        type: integer
+      status:
+        type: integer
+      type:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  service.RegisterReq:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    type: object
+  service.UserDTO:
+    properties:
+      avatar:
+        type: string
+      birthday:
+        type: string
+      created_at:
+        type: string
+      email:
+        type: string
+      gender:
+        type: integer
+      id:
+        type: integer
+      last_active_at:
+        type: string
+      last_login_at:
+        type: string
+      nickname:
+        type: string
+      online_status:
+        type: integer
+      phone:
+        type: string
+      signature:
+        type: string
+      uid:
+        type: string
+      updated_at:
+        type: string
+      username:
+        type: string
+    type: object
+host: localhost:6789
+info:
+  contact:
+    email: support@example.com
+    name: API Support
+    url: https://github.com/cydxin/chat-sdk/issues
+  description: |-
+    即时通讯 SDK 的 RESTful API 文档，包含用户管理、消息、房间、好友等模块
+
+    ## 业务状态码说明
+    | Code | 说明 |
+    |------|------|
+    | 0 | 成功 |
+    | 10001 | 参数错误 |
+    | 10002 | 用户不存在 |
+    | 10003 | 密码错误（登录失败） |
+    | 10004 | Token 无效 |
+    | 10005 | 权限不足 |
+    | 99999 | 内部错误 |
+
+    ## HTTP 状态码说明
+    - **200**: 业务请求成功（根据 response.code 判断业务状态）
+    - **401**: 认证失败（未登录/Token 无效/登录失败）
+    - **403**: 权限不足
+    - **500**: 服务器内部错误
+
+    ## 响应格式
+    所有接口统一返回格式：
+    ```json
+    {
+    "code": 0,
+    "msg": "success",
+    "data": {}
+    }
+    ```
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: https://github.com/cydxin/chat-sdk
+  title: Chat SDK API
+  version: "1.0"
+paths:
+  /friend/accept:
+    post:
+      consumes:
+      - application/json
+      description: 同意指定的好友申请
+      parameters:
+      - description: 申请信息（request_id, user_id）
+        in: body
+        name: req
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 同意好友申请
+      tags:
+      - 好友
+  /friend/check:
+    get:
+      consumes:
+      - application/json
+      description: 检查两个用户是否是好友
+      parameters:
+      - description: 用户1 ID
+        format: int64
+        in: query
+        name: user1
+        required: true
+        type: integer
+      - description: 用户2 ID
+        format: int64
+        in: query
+        name: user2
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 好友关系检查结果
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  additionalProperties:
+                    type: boolean
+                  type: object
+              type: object
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 检查好友关系
+      tags:
+      - 好友
+  /friend/delete:
+    post:
+      consumes:
+      - application/json
+      description: 删除好友关系
+      parameters:
+      - description: 好友信息（user1, user2）
+        in: body
+        name: req
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 删除好友
+      tags:
+      - 好友
+  /friend/list:
+    get:
+      consumes:
+      - application/json
+      description: 获取用户的好友列表
+      parameters:
+      - description: 用户ID
+        format: int64
+        in: query
+        name: user_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 好友列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/models.Friend'
+                  type: array
+              type: object
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 获取好友列表
+      tags:
+      - 好友
+  /friend/pending:
+    get:
+      consumes:
+      - application/json
+      description: 获取用户待处理的好友申请列表
+      parameters:
+      - description: 用户ID
+        format: int64
+        in: query
+        name: user_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 好友申请列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/models.FriendApply'
+                  type: array
+              type: object
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 获取待处理好友申请
+      tags:
+      - 好友
+  /friend/reject:
+    post:
+      consumes:
+      - application/json
+      description: 拒绝指定的好友申请
+      parameters:
+      - description: 申请信息（request_id, user_id）
+        in: body
+        name: req
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 拒绝好友申请
+      tags:
+      - 好友
+  /friend/request:
+    post:
+      consumes:
+      - application/json
+      description: 向目标用户发送好友申请
+      parameters:
+      - description: 好友申请（from_user, to_user, message）
+        in: body
+        name: req
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 发送好友申请
+      tags:
+      - 好友
+  /message/detail:
+    get:
+      consumes:
+      - application/json
+      description: 根据消息ID获取消息详情
+      parameters:
+      - description: 消息ID
+        format: int64
+        in: query
+        name: message_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 消息详情
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.MessageDTO'
+              type: object
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 获取消息详情
+      tags:
+      - 消息
+  /message/list:
+    get:
+      consumes:
+      - application/json
+      description: 分页获取房间历史消息
+      parameters:
+      - description: 房间ID
+        format: int64
+        in: query
+        name: room_id
+        required: true
+        type: integer
+      - description: 每页数量
+        in: query
+        name: limit
+        type: integer
+      - description: 偏移量
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 消息列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/service.MessageDTO'
+                  type: array
+              type: object
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 获取房间消息
+      tags:
+      - 消息
+  /message/recall:
+    post:
+      consumes:
+      - application/json
+      description: 撤回指定消息
+      parameters:
+      - description: 撤回信息（message_id, user_id）
+        in: body
+        name: req
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 撤回消息
+      tags:
+      - 消息
+  /room/group:
+    post:
+      consumes:
+      - application/json
+      description: 创建新的群聊房间
+      parameters:
+      - description: 群聊信息（name, creator, members）
+        in: body
+        name: req
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 房间信息
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/models.Room'
+              type: object
+        "400":
+          description: 请求错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 创建群聊
+      tags:
+      - 房间
+  /room/list:
+    get:
+      consumes:
+      - application/json
+      description: 获取用户参与的所有房间
+      parameters:
+      - description: 用户ID
+        format: int64
+        in: query
+        name: user_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 房间列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/models.Room'
+                  type: array
+              type: object
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 获取用户房间列表
+      tags:
+      - 房间
+  /room/member/add:
+    post:
+      consumes:
+      - application/json
+      description: 将用户添加到房间
+      parameters:
+      - description: 成员信息（room_id, user_id, operator_id）
+        in: body
+        name: req
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 添加房间成员
+      tags:
+      - 房间
+  /room/member/check:
+    get:
+      consumes:
+      - application/json
+      description: 检查用户是否是房间成员
+      parameters:
+      - description: 房间ID
+        format: int64
+        in: query
+        name: room_id
+        required: true
+        type: integer
+      - description: 用户ID
+        format: int64
+        in: query
+        name: user_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 检查结果
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  additionalProperties:
+                    type: boolean
+                  type: object
+              type: object
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 检查房间成员
+      tags:
+      - 房间
+  /room/member/remove:
+    post:
+      consumes:
+      - application/json
+      description: 将用户从房间移除
+      parameters:
+      - description: 成员信息（room_id, user_id, operator_id）
+        in: body
+        name: req
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 移除房间成员
+      tags:
+      - 房间
+  /room/private:
+    post:
+      consumes:
+      - application/json
+      description: 创建或获取两人私聊房间
+      parameters:
+      - description: 私聊信息（user_id, target_id）
+        in: body
+        name: req
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 房间信息
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/models.Room'
+              type: object
+        "400":
+          description: 请求错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 创建私聊
+      tags:
+      - 房间
+  /user/avatar:
+    post:
+      consumes:
+      - application/json
+      description: 更新用户头像 URL
+      parameters:
+      - description: 头像更新（user_id + avatar）
+        in: body
+        name: req
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的用户信息
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.UserDTO'
+              type: object
+        "400":
+          description: 请求错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 更新用户头像
+      tags:
+      - 用户
+  /user/info:
+    get:
+      consumes:
+      - application/json
+      description: |-
+        根据 user_id 查询用户详情
+
+        业务状态码说明:
+        - code=0: 查询成功
+        - code=10001: 参数错误（user_id 无效）
+        - code=10002: 用户不存在
+        - code=10004: Token 无效（返回 HTTP 401）
+      parameters:
+      - description: 用户ID
+        format: int64
+        in: query
+        name: user_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 查询成功 (code=0)
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.UserDTO'
+              type: object
+        "400":
+          description: 参数错误 (code=10001)
+          schema:
+            $ref: '#/definitions/response.Response'
+        "401":
+          description: 未登录或Token无效 (code=10004)
+          schema:
+            $ref: '#/definitions/response.Response'
+        "404":
+          description: 用户不存在 (code=10002)
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      - QueryToken: []
+      summary: 获取用户信息
+      tags:
+      - 用户
+  /user/login:
+    post:
+      consumes:
+      - application/json
+      description: 用户登录并返回 token
+      parameters:
+      - description: 登录信息
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/service.LoginReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 登录响应（token + 用户信息）
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.LoginResp'
+              type: object
+        "401":
+          description: 认证失败
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 用户登录
+      tags:
+      - 用户
+  /user/password:
+    post:
+      consumes:
+      - application/json
+      description: 修改用户密码（验证码/鉴权由调用层保证）
+      parameters:
+      - description: 密码修改（user_id + new_password）
+        in: body
+        name: req
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: 请求错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 修改用户密码
+      tags:
+      - 用户
+  /user/register:
+    post:
+      consumes:
+      - application/json
+      description: 创建新用户账号
+      parameters:
+      - description: 注册信息
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/service.RegisterReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 注册成功
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: 请求错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 用户注册
+      tags:
+      - 用户
+  /user/search:
+    get:
+      consumes:
+      - application/json
+      description: 按关键字搜索用户（username/nickname/uid）
+      parameters:
+      - description: 搜索关键字
+        in: query
+        name: keyword
+        type: string
+      - description: 排除的用户ID
+        format: int64
+        in: query
+        name: user_id
+        type: integer
+      - description: 返回条数
+        in: query
+        name: limit
+        type: integer
+      - description: 偏移量
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 用户列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/service.UserDTO'
+                  type: array
+              type: object
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 搜索用户
+      tags:
+      - 用户
+  /user/update:
+    post:
+      consumes:
+      - application/json
+      description: 更新用户资料（昵称/签名/性别等）
+      parameters:
+      - description: 更新信息（user_id + 可选字段）
+        in: body
+        name: req
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的用户信息
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.UserDTO'
+              type: object
+        "400":
+          description: 请求错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 更新用户信息
+      tags:
+      - 用户
+schemes:
+- http
+- https
+securityDefinitions:
+  BearerAuth:
+    description: 格式：Bearer <token>
+    in: header
+    name: Authorization
+    type: apiKey
+  QueryToken:
+    description: 用于 WebSocket 等无法传 header 的场景
+    in: query
+    name: token
+    type: apiKey
+swagger: "2.0"

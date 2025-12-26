@@ -1,0 +1,242 @@
+package chat_sdk
+
+import (
+	"log"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/gorilla/websocket"
+)
+
+const (
+	// Time 写入超时时间
+	writeWait = 10 * time.Second
+
+	// Time pong超时时间
+	pongWait = 60 * time.Second
+
+	// Send 对应的ping 必须小于pong
+	pingPeriod = (pongWait * 9) / 10
+
+	// Maximum 对等端允许消息大小
+	maxMessageSize = 512
+)
+
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Allow all origins for SDK
+	},
+}
+
+// Client ws和hub的连接
+type Client struct {
+	hub *WsServer
+
+	// 🔗链接
+	conn *websocket.Conn
+
+	// 消息缓冲区
+	send chan []byte
+
+	// UserID 和用户关联
+	UserID uint64
+
+	// Name
+	Name string
+}
+
+// readPump 将消息从client (websocket 连接) 到hub管理。
+func (c *Client) readPump() {
+	defer func() {
+		c.hub.unregister <- c
+		c.conn.Close()
+	}()
+	c.conn.SetReadLimit(maxMessageSize)
+	c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+	for {
+		_, message, err := c.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("error: %v", err)
+			}
+			break
+		}
+		// json消息处理 todo:使用更高性能的protobuf
+		// 用回调实现
+		//  {"send_to":"房间号","send_type":"发送类型 1文字 2图片 3语音 4应用 5分享","send_content":"发送内容"}
+		// e.g {"send_to":1,"send_type":1,"send_content":"hello"}
+		c.hub.handleMessage(c, message)
+	}
+}
+
+// writePump 将消息从hub管理写到具体的client (websocket 连接)。
+func (c *Client) writePump() {
+	ticker := time.NewTicker(pingPeriod)
+	defer func() {
+		ticker.Stop()
+		c.conn.Close()
+	}()
+	for {
+		select {
+		case message, ok := <-c.send:
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if !ok {
+				// hub 已经关闭了此ws
+				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+
+			w, err := c.conn.NextWriter(websocket.TextMessage)
+			if err != nil {
+				return
+			}
+			w.Write(message)
+
+			// 一次性发送管道剩余全部的消息，不重新走message, ok := <-c.send，提升性能
+			// 额外的消息批量写入数据库保持结果一致
+			n := len(c.send)
+			for i := 0; i < n; i++ {
+				w.Write(<-c.send)
+			}
+
+			if err := w.Close(); err != nil {
+				return
+			}
+		case <-ticker.C:
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
+}
+
+type WsServer struct {
+	clients map[*Client]bool
+	// 用户的 client
+	userClients map[uint64][]*Client
+	// 客服的 client
+	kfClients map[uint64][]*Client
+
+	broadcast  chan []byte
+	register   chan *Client
+	unregister chan *Client
+	mu         sync.RWMutex
+	// 回调处理消息
+	onMessage func(client *Client, msg []byte)
+}
+
+func NewWsServer() *WsServer {
+	return &WsServer{
+		broadcast:   make(chan []byte),
+		register:    make(chan *Client),
+		unregister:  make(chan *Client),
+		clients:     make(map[*Client]bool),
+		userClients: make(map[uint64][]*Client),
+		kfClients:   make(map[uint64][]*Client),
+	}
+}
+
+func (h *WsServer) Run() {
+	for {
+		select {
+		case client := <-h.register:
+			h.mu.Lock()
+			h.clients[client] = true
+
+			if client.UserID > 10000 {
+				h.userClients[client.UserID] = append(h.userClients[client.UserID], client)
+			} else {
+				h.kfClients[client.UserID] = append(h.kfClients[client.UserID], client)
+			}
+
+			h.mu.Unlock()
+		case client := <-h.unregister:
+			h.mu.Lock()
+			if _, ok := h.clients[client]; ok {
+				delete(h.clients, client)
+				close(client.send)
+
+				// 根据 UserID 选择对应的 clients map
+				var clientsMap map[uint64][]*Client
+				if client.UserID > 10000 {
+					clientsMap = h.userClients
+				} else {
+					clientsMap = h.kfClients
+				}
+
+				// 从对应的 map 中删除该 client
+				if userConns, exists := clientsMap[client.UserID]; exists {
+					for i, conn := range userConns {
+						if conn == client {
+							clientsMap[client.UserID] = append(userConns[:i], userConns[i+1:]...)
+							break
+						}
+					}
+					if len(clientsMap[client.UserID]) == 0 {
+						delete(clientsMap, client.UserID)
+					}
+				}
+			}
+			h.mu.Unlock()
+		case message := <-h.broadcast:
+			h.mu.RLock()
+			for client := range h.clients {
+				select {
+				case client.send <- message:
+				default:
+					close(client.send)
+					delete(h.clients, client)
+				}
+			}
+			h.mu.RUnlock()
+		}
+	}
+}
+
+func (h *WsServer) handleMessage(client *Client, msg []byte) {
+	if h.onMessage != nil {
+		h.onMessage(client, msg)
+	}
+}
+func (h *WsServer) SetOnMessage(fn func(client *Client, msg []byte)) {
+	h.onMessage = fn
+}
+
+// ServeWS 处理ws的请求
+func (h *WsServer) ServeWS(w http.ResponseWriter, r *http.Request, userID uint64, name string) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	client := &Client{hub: h, conn: conn, send: make(chan []byte, 256), UserID: userID, Name: name}
+	client.hub.register <- client
+
+	// 允许调用者通过在
+	// 创建协程启动读写
+	go client.writePump()
+	go client.readPump()
+	select {}
+}
+
+// SendToUser 发送消息到用户
+func (h *WsServer) SendToUser(userID uint64, msg []byte) {
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if clients, ok := h.userClients[userID]; ok {
+		for _, client := range clients {
+			select {
+			case client.send <- msg:
+			default:
+
+			}
+		}
+	}
+}
