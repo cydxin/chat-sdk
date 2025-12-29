@@ -3,6 +3,7 @@ package models
 import (
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -159,17 +160,17 @@ func (RoomUser) TableName() string {
 
 // Message 消息表
 type Message struct {
-	ID           uint64  `gorm:"primarykey"`
-	MessageID    string  `gorm:"size:32;uniqueIndex;not null"` // 对外消息 ID
-	RoomID       uint64  `gorm:"index;not null"`               // 房间 ID
-	SenderID     uint64  `gorm:"index;not null"`               // 发送者 ID
-	ReplyToMsgID *uint64 `gorm:"index"`                        // 回复的消息 ID
-	Type         uint8   `gorm:"type:tinyint;default:1"`       // 消息类型: 1-文本 2-图片 3-语音 4-视频 5-文件 6-位置
-	Content      string  `gorm:"type:text;not null"`           // 消息内容
-	Extra        string  `gorm:"type:json"`                    // 扩展信息
-	IsSystem     bool    `gorm:"default:false"`                // 是否为系统消息
-	IsEncrypted  bool    `gorm:"default:false"`                // 是否加密
-	Status       uint8   `gorm:"type:tinyint;default:0"`       // 状态: 0-发送中 1-已发送 2-已送达 3-已读 4-撤回（会在聊天窗口留下痕迹） 5-删除（自己不可见） 6/7-双删（Sender/非Sender删除)在私聊中互相可以删除，但在群中你只能删除自己的，已经管理员进行删除
+	ID           uint64  `gorm:"primarykey"`                       // 内部数据库主键 ID
+	MessageID    string  `gorm:"size:32;uniqueIndex;not null"`     // 对外消息 ID (UUID)
+	RoomID       uint64  `gorm:"index;not null"`                   // 房间 ID
+	SenderID     uint64  `gorm:"index;not null"`                   // 发送者 ID
+	ReplyToMsgID *uint64 `gorm:"index"`                            // 回复的消息 ID (引用 Message.ID)
+	Type         uint8   `gorm:"type:tinyint;default:1"`           // 消息类型: 1-文本 2-图片 3-语音 4-视频 5-文件 6-位置
+	Content      string  `gorm:"type:text;not null"`               // 消息内容
+	Extra        string  `gorm:"type:json"`                        // 扩展信息
+	IsSystem     bool    `gorm:"default:false"`                    // 是否为系统消息
+	IsEncrypted  bool    `gorm:"default:false"`                    // 是否加密
+	Status       uint8   `gorm:"type:tinyint;default:0"`           // 状态: 0-发送中 1-已发送 2-已送达 3-已读 4-撤回（会在聊天窗口留下痕迹） 5-删除（自己不可见） 6/7-双删（Sender/非Sender删除)在私聊中互相可以删除，但在群中你只能删除自己的，已经管理员进行删除
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    gorm.DeletedAt `gorm:"index"`
@@ -182,6 +183,14 @@ type Message struct {
 
 func (Message) TableName() string {
 	return prefix + "message"
+}
+
+// BeforeCreate 在创建消息前自动生成 MessageID (UUID)
+func (m *Message) BeforeCreate(tx *gorm.DB) (err error) {
+	if m.MessageID == "" {
+		m.MessageID = uuid.New().String()
+	}
+	return nil
 }
 
 const (
@@ -197,7 +206,7 @@ const (
 // MessageStatus 消息状态表（记录每个用户的已读状态）
 type MessageStatus struct {
 	ID        uint64     `gorm:"primarykey"`
-	MessageID uint64     `gorm:"index:idx_msg_user,unique;not null"` // 消息 ID
+	MessageID uint64     `gorm:"index:idx_msg_user,unique;not null"` // 消息内部 ID (引用 Message.ID)
 	UserID    uint64     `gorm:"index:idx_msg_user,unique;not null"` // 用户 ID
 	RoomID    uint64     `gorm:"index:idx_msg_user,unique;not null"` // 房间 ID
 	IsRead    bool       `gorm:"default:false"`                      // 是否已读
@@ -207,7 +216,7 @@ type MessageStatus struct {
 	UpdatedAt time.Time
 
 	// 关联关系
-	Message Message `gorm:"foreignKey:MessageID"`
+	Message Message `gorm:"foreignKey:MessageID"` // 注意：这里引用的是 Message.ID，不是 Message.MessageID
 	User    User    `gorm:"foreignKey:UserID"`
 }
 
@@ -220,19 +229,19 @@ type Conversation struct {
 	ID            uint64  `gorm:"primarykey"`
 	UserID        uint64  `gorm:"index:idx_user_room,unique;not null"` // 用户 ID
 	RoomID        uint64  `gorm:"index:idx_user_room,unique;not null"` // 房间 ID
-	LastMessageID *uint64 `gorm:"index"`                               // 最后一条消息 ID
+	LastMessageID *uint64 `gorm:"index"`                               // 最后一条消息内部 ID (引用 Message.ID)
 	UnreadCount   uint64  `gorm:"default:0"`                           // 未读消息数
 	IsMuted       bool    `gorm:"default:false"`                       // 是否免打扰
 	IsPinned      bool    `gorm:"default:false"`                       // 是否置顶
-	LastReadMsgID *uint64 `gorm:"index"`                               // 最后阅读的消息 ID
+	LastReadMsgID *uint64 `gorm:"index"`                               // 最后阅读的消息内部 ID (引用 Message.ID)
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 
 	// 关联关系
 	User        User     `gorm:"foreignKey:UserID"`
 	Room        Room     `gorm:"foreignKey:RoomID"`
-	LastMessage *Message `gorm:"foreignKey:LastMessageID"`
-	LastReadMsg *Message `gorm:"foreignKey:LastReadMsgID"`
+	LastMessage *Message `gorm:"foreignKey:LastMessageID"` // 引用 Message.ID
+	LastReadMsg *Message `gorm:"foreignKey:LastReadMsgID"` // 引用 Message.ID
 }
 
 func (Conversation) TableName() string {
