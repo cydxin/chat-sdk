@@ -258,12 +258,30 @@ Body: {
 
 SDK 会自动创建以下表（带配置的前缀）：
 
-- `{prefix}chat_rooms` - 聊天房间表
-- `{prefix}chat_members` - 房间成员表
-- `{prefix}chat_messages` - 消息表
-- `{prefix}chat_notifications` - 通知表
-- `{prefix}friend_requests` - 好友申请表
-- `{prefix}friendships` - 好友关系表
+- `{prefix}user` - 用户表
+- `{prefix}room` - 聊天房间表
+- `{prefix}room_user` - 房间成员表
+- `{prefix}message` - 消息表
+- `{prefix}message_status` - 消息状态表
+- `{prefix}friend` - 好友关系表
+- `{prefix}friend_apply` - 好友申请表
+- `{prefix}conversation` - 会话表
+
+### 重要说明：Message.MessageID 字段
+
+`Message` 表包含两个 ID 字段：
+
+- **`id`** (uint64): 内部数据库主键，用于数据库内的外键引用
+- **`message_id`** (VARCHAR(32)): 外部 UUID，用于 API 响应和客户端消息标识
+
+如果您遇到 `message_id` 字段类型不匹配的问题（数据库中是 bigint 而非 VARCHAR），请参阅 [MIGRATION_GUIDE.md](./MIGRATION_GUIDE.md) 进行数据库迁移。
+
+### UUID 自动生成
+
+SDK 会自动为以下字段生成 UUID：
+- `User.UID` - 用户唯一标识
+- `Room.RoomID` - 房间唯一标识
+- `Message.MessageID` - 消息唯一标识（v1.1+ 版本）
 
 ## 高级特性
 
