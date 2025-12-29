@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/cydxin/chat-sdk/models"
 	"gorm.io/gorm"
 )
 
@@ -12,7 +13,7 @@ import (
 // 警告：这会清空 message 表的数据，请在生产环境使用前备份数据
 func (c *ChatEngine) MigrateMessageIDToUUID() error {
 	db := c.config.DB
-	tableName := "im_message" // 使用 prefix + "message"
+	tableName := c.config.TablePrefix + "message" // 使用配置的表前缀
 
 	log.Printf("开始迁移 %s 表的 message_id 字段...", tableName)
 
@@ -57,31 +58,51 @@ func (c *ChatEngine) MigrateMessageIDToUUID() error {
 
 		// 2. 清空表数据（因为 bigint ID 无法直接转换为 UUID）
 		log.Println("步骤 2: 清空表数据...")
-		if err := tx.Exec(fmt.Sprintf("TRUNCATE TABLE %s", tableName)).Error; err != nil {
+		// 使用 Delete 而不是 TRUNCATE 来支持更多数据库类型
+		if err := tx.Where("1 = 1").Delete(&models.Message{}).Error; err != nil {
 			return fmt.Errorf("清空表失败: %v", err)
 		}
 
 		// 3. 修改列类型
 		log.Println("步骤 3: 修改 message_id 列类型...")
+		// 使用 GORM 的 Migrator 会更安全，但可能不支持所有类型转换
+		// 对于复杂的类型转换，仍需要使用原生 SQL
+		// 验证表名格式（只允许字母、数字和下划线）
+		if !isValidTableName(tableName) {
+			return fmt.Errorf("invalid table name: %s", tableName)
+		}
+		
+		// MySQL/MariaDB
 		if err := tx.Exec(fmt.Sprintf(
-			"ALTER TABLE %s MODIFY COLUMN message_id VARCHAR(32) NOT NULL",
+			"ALTER TABLE `%s` MODIFY COLUMN `message_id` VARCHAR(32) NOT NULL",
 			tableName,
 		)).Error; err != nil {
 			return fmt.Errorf("修改列类型失败: %v", err)
 		}
 
-		// 4. 重新创建唯一索引（如果被删除）
-		log.Println("步骤 4: 重新创建唯一索引...")
-		if err := tx.Exec(fmt.Sprintf(
-			"CREATE UNIQUE INDEX IF NOT EXISTS idx_message_message_id ON %s(message_id)",
-			tableName,
-		)).Error; err != nil {
-			// 某些数据库可能已经有索引，忽略错误
-			log.Printf("创建索引警告: %v", err)
+		// 4. 确保唯一索引存在
+		log.Println("步骤 4: 确保唯一索引存在...")
+		// 使用 GORM Migrator 创建索引更安全
+		if !tx.Migrator().HasIndex(&models.Message{}, "message_id") {
+			if err := tx.Migrator().CreateIndex(&models.Message{}, "message_id"); err != nil {
+				log.Printf("创建索引警告: %v", err)
+			}
 		}
 
 		log.Println("迁移完成！")
 		return nil
 	})
+}
+
+// isValidTableName 验证表名格式，防止 SQL 注入
+func isValidTableName(name string) bool {
+	// 只允许字母、数字和下划线
+	for _, c := range name {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || 
+			(c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+	return len(name) > 0 && len(name) < 64 // MySQL 表名最大 64 字符
 }
 
