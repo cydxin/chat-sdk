@@ -7,23 +7,24 @@ import (
 	"time"
 
 	"github.com/cydxin/chat-sdk/models"
+	"gorm.io/datatypes"
 )
 
 // MessageDTO 消息数据传输对象（避免 Swagger 递归）
 type MessageDTO struct {
-	ID           uint64    `json:"id"`
-	MessageID    string    `json:"message_id"`
-	RoomID       uint64    `json:"room_id"`
-	SenderID     uint64    `json:"sender_id"`
-	ReplyToMsgID *uint64   `json:"reply_to_msg_id,omitempty"`
-	Type         uint8     `json:"type"`
-	Content      string    `json:"content"`
-	Extra        string    `json:"extra,omitempty"`
-	IsSystem     bool      `json:"is_system"`
-	IsEncrypted  bool      `json:"is_encrypted"`
-	Status       uint8     `json:"status"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           uint64         `json:"id"`
+	MessageID    string         `json:"message_id"`
+	RoomID       uint64         `json:"room_id"`
+	SenderID     uint64         `json:"sender_id"`
+	ReplyToMsgID *uint64        `json:"reply_to_msg_id,omitempty"`
+	Type         uint8          `json:"type"`
+	Content      string         `json:"content"`
+	Extra        datatypes.JSON `json:"extra,omitempty"`
+	IsSystem     bool           `json:"is_system"`
+	IsEncrypted  bool           `json:"is_encrypted"`
+	Status       uint8          `json:"status"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
 // ToMessageDTO 将 Message 转换为 MessageDTO
@@ -32,8 +33,8 @@ func ToMessageDTO(msg *models.Message) *MessageDTO {
 		return nil
 	}
 	return &MessageDTO{
-		ID:           msg.ID,
-		MessageID:    msg.MessageID,
+		ID: msg.ID,
+		//MessageID:    msg.MessageID,
 		RoomID:       msg.RoomID,
 		SenderID:     msg.SenderID,
 		ReplyToMsgID: msg.ReplyToMsgID,
@@ -72,10 +73,12 @@ func NewMessageService(s *Service) *MessageService {
 // SaveMessage 保存消息到数据库
 func (s *MessageService) SaveMessage(roomID uint64, senderID uint64, content string, msgType uint8) (*models.Message, error) {
 	msg := &models.Message{
+		//MessageID: uuid.New().String(), // 生成唯一的消息 ID
 		RoomID:   roomID,
 		SenderID: senderID,
 		Type:     msgType,
 		Content:  content,
+		Status:   models.MessageStatusSent, // 默认状态为已发送
 	}
 	err := s.messageDAO.Create(msg)
 	return msg, err

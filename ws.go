@@ -117,10 +117,8 @@ func (c *Client) writePump() {
 
 type WsServer struct {
 	clients map[*Client]bool
-	// 用户的 client
+	// userID -> all active websocket connections for that user (supports multi-device)
 	userClients map[uint64][]*Client
-	// 客服的 client
-	kfClients map[uint64][]*Client
 
 	broadcast  chan []byte
 	register   chan *Client
@@ -137,7 +135,6 @@ func NewWsServer() *WsServer {
 		unregister:  make(chan *Client),
 		clients:     make(map[*Client]bool),
 		userClients: make(map[uint64][]*Client),
-		kfClients:   make(map[uint64][]*Client),
 	}
 }
 
@@ -147,13 +144,8 @@ func (h *WsServer) Run() {
 		case client := <-h.register:
 			h.mu.Lock()
 			h.clients[client] = true
-
-			if client.UserID > 10000 {
-				h.userClients[client.UserID] = append(h.userClients[client.UserID], client)
-			} else {
-				h.kfClients[client.UserID] = append(h.kfClients[client.UserID], client)
-			}
-
+			h.userClients[client.UserID] = append(h.userClients[client.UserID], client)
+			log.Printf("ws register user=%d totalClients=%d userKeys=%d", client.UserID, len(h.clients), len(h.userClients))
 			h.mu.Unlock()
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -161,24 +153,15 @@ func (h *WsServer) Run() {
 				delete(h.clients, client)
 				close(client.send)
 
-				// 根据 UserID 选择对应的 clients map
-				var clientsMap map[uint64][]*Client
-				if client.UserID > 10000 {
-					clientsMap = h.userClients
-				} else {
-					clientsMap = h.kfClients
-				}
-
-				// 从对应的 map 中删除该 client
-				if userConns, exists := clientsMap[client.UserID]; exists {
+				if userConns, exists := h.userClients[client.UserID]; exists {
 					for i, conn := range userConns {
 						if conn == client {
-							clientsMap[client.UserID] = append(userConns[:i], userConns[i+1:]...)
+							h.userClients[client.UserID] = append(userConns[:i], userConns[i+1:]...)
 							break
 						}
 					}
-					if len(clientsMap[client.UserID]) == 0 {
-						delete(clientsMap, client.UserID)
+					if len(h.userClients[client.UserID]) == 0 {
+						delete(h.userClients, client.UserID)
 					}
 				}
 			}
@@ -216,27 +199,27 @@ func (h *WsServer) ServeWS(w http.ResponseWriter, r *http.Request, userID uint64
 	}
 	client := &Client{hub: h, conn: conn, send: make(chan []byte, 256), UserID: userID, Name: name}
 	client.hub.register <- client
+	log.Println("注册进去: ", client.UserID)
 
-	// 允许调用者通过在
-	// 创建协程启动读写
 	go client.writePump()
 	go client.readPump()
-	select {}
+
+	// 不要 select{} 永久阻塞 handler；连接生命周期由 readPump/writePump 控制。
 }
 
 // SendToUser 发送消息到用户
 func (h *WsServer) SendToUser(userID uint64, msg []byte) {
-
 	h.mu.RLock()
-	defer h.mu.RUnlock()
+	clients := h.userClients[userID]
+	keys := len(h.userClients)
+	h.mu.RUnlock()
 
-	if clients, ok := h.userClients[userID]; ok {
-		for _, client := range clients {
-			select {
-			case client.send <- msg:
-			default:
-
-			}
+	log.Printf("SendToUser user=%d userKeys=%d conns=%d", userID, keys, len(clients))
+	for _, client := range clients {
+		select {
+		case client.send <- msg:
+		default:
+			// 丢弃避免阻塞
 		}
 	}
 }

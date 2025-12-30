@@ -44,13 +44,12 @@ const docTemplate = `{
                 "summary": "同意好友申请",
                 "parameters": [
                     {
-                        "description": "申请信息（request_id, user_id）",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "object"
-                        }
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "申请ID",
+                        "name": "request_id",
+                        "in": "query",
+                        "required": true
                     }
                 ],
                 "responses": {
@@ -82,7 +81,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "检查两个用户是否是好友",
+                "description": "检查当前用户与目标用户是否是好友",
                 "consumes": [
                     "application/json"
                 ],
@@ -97,16 +96,8 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "format": "int64",
-                        "description": "用户1 ID",
-                        "name": "user1",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "format": "int64",
-                        "description": "用户2 ID",
-                        "name": "user2",
+                        "description": "目标用户 ID",
+                        "name": "target_id",
                         "in": "query",
                         "required": true
                     }
@@ -168,13 +159,12 @@ const docTemplate = `{
                 "summary": "删除好友",
                 "parameters": [
                     {
-                        "description": "好友信息（user1, user2）",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "object"
-                        }
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "好友ID",
+                        "name": "friend_id",
+                        "in": "query",
+                        "required": true
                     }
                 ],
                 "responses": {
@@ -206,7 +196,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "获取用户的好友列表",
+                "description": "获取当前用户的好友列表",
                 "consumes": [
                     "application/json"
                 ],
@@ -217,16 +207,6 @@ const docTemplate = `{
                     "好友"
                 ],
                 "summary": "获取好友列表",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "format": "int64",
-                        "description": "用户ID",
-                        "name": "user_id",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "好友列表",
@@ -271,7 +251,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "获取用户待处理的好友申请列表",
+                "description": "获取当前用户待处理的好友申请列表",
                 "consumes": [
                     "application/json"
                 ],
@@ -282,16 +262,6 @@ const docTemplate = `{
                     "好友"
                 ],
                 "summary": "获取待处理好友申请",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "format": "int64",
-                        "description": "用户ID",
-                        "name": "user_id",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "好友申请列表",
@@ -349,13 +319,12 @@ const docTemplate = `{
                 "summary": "拒绝好友申请",
                 "parameters": [
                     {
-                        "description": "申请信息（request_id, user_id）",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "object"
-                        }
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "申请ID",
+                        "name": "request_id",
+                        "in": "query",
+                        "required": true
                     }
                 ],
                 "responses": {
@@ -400,7 +369,7 @@ const docTemplate = `{
                 "summary": "发送好友申请",
                 "parameters": [
                     {
-                        "description": "好友申请（from_user, to_user, message）",
+                        "description": "好友申请（to_user, message）",
                         "name": "req",
                         "in": "body",
                         "required": true,
@@ -426,6 +395,58 @@ const docTemplate = `{
                         "description": "服务器错误",
                         "schema": {
                             "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/member/search": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "搜索用户，返回ID列表",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户"
+                ],
+                "summary": "搜索用户 (Member)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "搜索关键字",
+                        "name": "keyword",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "返回条数",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "用户ID列表",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "integer",
+                                "format": "int64"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "服务器错误",
+                        "schema": {
+                            "type": "string"
                         }
                     }
                 }
@@ -590,13 +611,20 @@ const docTemplate = `{
                 "summary": "撤回消息",
                 "parameters": [
                     {
-                        "description": "撤回信息（message_id, user_id）",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "object"
-                        }
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "消息ID",
+                        "name": "message_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "format": "int32",
+                        "description": "4-撤回（会在聊天窗口留下痕迹） 5-删除（自己不可见） 6/7-双删（Sender/非Sender删除)在私聊中互相可以删除，但在群中你只能删除自己的，已经管理员进行删除 ",
+                        "name": "status",
+                        "in": "query",
+                        "required": true
                     }
                 ],
                 "responses": {
@@ -614,6 +642,248 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/moment/comment/add": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "对动态发表评论，或对评论进行二级回复",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "朋友圈"
+                ],
+                "summary": "发表评论或回复",
+                "parameters": [
+                    {
+                        "description": "评论内容（moment_id, content, parent_id 可选）",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "未登录",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/moment/comment/list": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "获取某条动态下的评论（时间升序）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "朋友圈"
+                ],
+                "summary": "获取评论列表",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "动态ID",
+                        "name": "moment_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "偏移量",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "评论列表",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/service.CommentDTO"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/moment/create": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "标题 + 图片(最多9张) 或 视频(1个)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "朋友圈"
+                ],
+                "summary": "发布朋友圈动态",
+                "parameters": [
+                    {
+                        "description": "动态内容（title, images(最多9) 或 video 二选一）",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/service.CreateMomentReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "创建成功",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.MomentDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "401": {
+                        "description": "未登录",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/moment/list": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "获取自己与好友发布的动态（按时间倒序）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "朋友圈"
+                ],
+                "summary": "朋友圈动态列表",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "偏移量",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "动态列表",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/service.MomentDTO"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "未登录",
                         "schema": {
                             "$ref": "#/definitions/response.Response"
                         }
@@ -641,7 +911,7 @@ const docTemplate = `{
                 "summary": "创建群聊",
                 "parameters": [
                     {
-                        "description": "群聊信息（name, creator, members）",
+                        "description": "群聊信息（name, members）",
                         "name": "req",
                         "in": "body",
                         "required": true,
@@ -691,7 +961,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "获取用户参与的所有房间",
+                "description": "获取当前用户参与的所有房间",
                 "consumes": [
                     "application/json"
                 ],
@@ -702,16 +972,6 @@ const docTemplate = `{
                     "房间"
                 ],
                 "summary": "获取用户房间列表",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "format": "int64",
-                        "description": "用户ID",
-                        "name": "user_id",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "房间列表",
@@ -769,13 +1029,20 @@ const docTemplate = `{
                 "summary": "添加房间成员",
                 "parameters": [
                     {
-                        "description": "成员信息（room_id, user_id, operator_id）",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "object"
-                        }
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "房间ID",
+                        "name": "room_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "用户ID",
+                        "name": "user_id",
+                        "in": "query",
+                        "required": true
                     }
                 ],
                 "responses": {
@@ -807,7 +1074,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "检查用户是否是房间成员",
+                "description": "检查用户是否是房间成员，如果不传 user_id 则检查当前用户",
                 "consumes": [
                     "application/json"
                 ],
@@ -830,10 +1097,9 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "format": "int64",
-                        "description": "用户ID",
+                        "description": "用户ID (不传则查自己)",
                         "name": "user_id",
-                        "in": "query",
-                        "required": true
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -893,13 +1159,20 @@ const docTemplate = `{
                 "summary": "移除房间成员",
                 "parameters": [
                     {
-                        "description": "成员信息（room_id, user_id, operator_id）",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "object"
-                        }
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "房间ID",
+                        "name": "room_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "用户ID",
+                        "name": "user_id",
+                        "in": "query",
+                        "required": true
                     }
                 ],
                 "responses": {
@@ -944,13 +1217,12 @@ const docTemplate = `{
                 "summary": "创建私聊",
                 "parameters": [
                     {
-                        "description": "私聊信息（user_id, target_id）",
-                        "name": "req",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "type": "object"
-                        }
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "目标用户ID",
+                        "name": "target_id",
+                        "in": "query",
+                        "required": true
                     }
                 ],
                 "responses": {
@@ -994,7 +1266,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "更新用户头像 URL",
+                "description": "更新当前用户头像 URL",
                 "consumes": [
                     "application/json"
                 ],
@@ -1007,7 +1279,7 @@ const docTemplate = `{
                 "summary": "更新用户头像",
                 "parameters": [
                     {
-                        "description": "头像更新（user_id + avatar）",
+                        "description": "头像更新（avatar）",
                         "name": "req",
                         "in": "body",
                         "required": true,
@@ -1049,12 +1321,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "QueryToken": []
                     }
                 ],
-                "description": "根据 user_id 查询用户详情\n\n业务状态码说明:\n- code=0: 查询成功\n- code=10001: 参数错误（user_id 无效）\n- code=10002: 用户不存在\n- code=10004: Token 无效（返回 HTTP 401）",
+                "description": "根据 user_id 查询用户详情，如果不传 user_id 则查询当前登录用户",
                 "consumes": [
                     "application/json"
                 ],
@@ -1069,15 +1338,14 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "format": "int64",
-                        "description": "用户ID",
+                        "description": "用户ID (不传则查自己)",
                         "name": "user_id",
-                        "in": "query",
-                        "required": true
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "查询成功 (code=0)",
+                        "description": "查询成功",
                         "schema": {
                             "allOf": [
                                 {
@@ -1095,19 +1363,13 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "参数错误 (code=10001)",
+                        "description": "参数错误",
                         "schema": {
                             "$ref": "#/definitions/response.Response"
                         }
                     },
                     "401": {
-                        "description": "未登录或Token无效 (code=10004)",
-                        "schema": {
-                            "$ref": "#/definitions/response.Response"
-                        }
-                    },
-                    "404": {
-                        "description": "用户不存在 (code=10002)",
+                        "description": "未登录",
                         "schema": {
                             "$ref": "#/definitions/response.Response"
                         }
@@ -1174,7 +1436,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "修改用户密码（验证码/鉴权由调用层保证）",
+                "description": "修改当前用户密码（验证码/鉴权由调用层保证）",
                 "consumes": [
                     "application/json"
                 ],
@@ -1187,7 +1449,7 @@ const docTemplate = `{
                 "summary": "修改用户密码",
                 "parameters": [
                     {
-                        "description": "密码修改（user_id + new_password）",
+                        "description": "密码修改（new_password）",
                         "name": "req",
                         "in": "body",
                         "required": true,
@@ -1259,7 +1521,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "按关键字搜索用户（username/nickname/uid）",
+                "description": "按关键字搜索用户（username/nickname/uid），自动排除当前用户",
                 "consumes": [
                     "application/json"
                 ],
@@ -1275,13 +1537,6 @@ const docTemplate = `{
                         "type": "string",
                         "description": "搜索关键字",
                         "name": "keyword",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "format": "int64",
-                        "description": "排除的用户ID",
-                        "name": "user_id",
                         "in": "query"
                     },
                     {
@@ -1335,7 +1590,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "更新用户资料（昵称/签名/性别等）",
+                "description": "更新当前用户资料（昵称/签名/性别等）",
                 "consumes": [
                     "application/json"
                 ],
@@ -1348,7 +1603,7 @@ const docTemplate = `{
                 "summary": "更新用户信息",
                 "parameters": [
                     {
-                        "description": "更新信息（user_id + 可选字段）",
+                        "description": "更新信息（可选字段）",
                         "name": "req",
                         "in": "body",
                         "required": true,
@@ -1524,8 +1779,10 @@ const docTemplate = `{
                     "$ref": "#/definitions/gorm.DeletedAt"
                 },
                 "extra": {
-                    "description": "扩展信息",
-                    "type": "string"
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
                 },
                 "id": {
                     "type": "integer"
@@ -1537,10 +1794,6 @@ const docTemplate = `{
                 "isSystem": {
                     "description": "是否为系统消息",
                     "type": "boolean"
-                },
-                "messageID": {
-                    "description": "对外消息 ID",
-                    "type": "string"
                 },
                 "replyTo": {
                     "$ref": "#/definitions/models.Message"
@@ -1558,7 +1811,7 @@ const docTemplate = `{
                     ]
                 },
                 "roomID": {
-                    "description": "房间 ID",
+                    "description": "MessageID    string  ` + "`" + `gorm:\"size:36;uniqueIndex;not null\"` + "`" + ` // 对外消息 ID",
                     "type": "integer"
                 },
                 "sender": {
@@ -1631,8 +1884,8 @@ const docTemplate = `{
                     "description": "房间名称",
                     "type": "string"
                 },
-                "roomID": {
-                    "description": "对外房间 ID",
+                "roomAccount": {
+                    "description": "RoomAccount 对外房间号/群号（可用 10 位数字字符串或自定义规则），用于搜索/分享；\n不参与任何外键关联，避免再被 GORM 推断成 bigint。",
                     "type": "string"
                 },
                 "roomUsers": {
@@ -1692,7 +1945,7 @@ const docTemplate = `{
                     ]
                 },
                 "roomID": {
-                    "description": "房间 ID",
+                    "description": "房间 ID (对应 Room.ID)",
                     "type": "integer"
                 },
                 "updatedAt": {
@@ -1820,6 +2073,48 @@ const docTemplate = `{
                 }
             }
         },
+        "service.CommentDTO": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "moment_id": {
+                    "type": "integer"
+                },
+                "parent_id": {
+                    "type": "integer"
+                },
+                "user_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "service.CreateMomentReq": {
+            "type": "object",
+            "properties": {
+                "images": {
+                    "description": "最多9张",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                },
+                "video": {
+                    "description": "单个视频URL",
+                    "type": "string"
+                }
+            }
+        },
         "service.LoginReq": {
             "type": "object",
             "properties": {
@@ -1854,7 +2149,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "extra": {
-                    "type": "string"
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
                 },
                 "id": {
                     "type": "integer"
@@ -1884,6 +2182,53 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.MomentDTO": {
+            "type": "object",
+            "properties": {
+                "comments_cnt": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "images_count": {
+                    "type": "integer"
+                },
+                "media_type": {
+                    "type": "integer"
+                },
+                "medias": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.MomentMediaDTO"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "service.MomentMediaDTO": {
+            "type": "object",
+            "properties": {
+                "sort": {
+                    "type": "integer"
+                },
+                "type": {
+                    "description": "1-图片 2-视频",
+                    "type": "integer"
+                },
+                "url": {
                     "type": "string"
                 }
             }

@@ -3,6 +3,7 @@ package models
 import (
 	"time"
 
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -69,20 +70,6 @@ type Friend struct {
 	Indexes []gorm.Index `gorm:"-"`
 }
 
-func (f *Friend) AfterCreate(tx *gorm.DB) (err error) {
-	// 好友关系是双向的，自动创建反向关系
-	if f.Status == 1 { // 只对正常状态的好友创建反向关系
-		reverseFriend := &Friend{
-			UserID:   f.FriendID,
-			FriendID: f.UserID,
-			Remark:   "",
-			Status:   1,
-		}
-		return tx.Create(reverseFriend).Error
-	}
-	return nil
-}
-
 func (f *Friend) TableName() string {
 	return prefix + "friend"
 }
@@ -111,23 +98,27 @@ func (FriendApply) TableName() string {
 
 // Room 聊天房间表
 type Room struct {
-	ID          uint64 `gorm:"primarykey"`
-	RoomID      string `gorm:"size:32;uniqueIndex;not null"` // 对外房间 ID
-	Name        string `gorm:"size:100"`                     // 房间名称
-	Avatar      string `gorm:"size:500"`                     // 房间头像
-	Type        uint8  `gorm:"type:tinyint;default:1"`       // 类型: 1-私聊 2-群聊
-	CreatorID   uint64 `gorm:"index"`                        // 创建者 ID
-	Description string `gorm:"size:500"`                     // 描述
-	MemberLimit int    `gorm:"default:200"`                  // 成员上限
-	IsEncrypted bool   `gorm:"default:false"`                // 是否端到端加密
+	ID uint64 `gorm:"primarykey"`
+
+	// RoomAccount 对外房间号/群号（可用 10 位数字字符串或自定义规则），用于搜索/分享；
+	// 不参与任何外键关联，避免再被 GORM 推断成 bigint。
+	RoomAccount string `gorm:"column:room_account;type:varchar(32);uniqueIndex;not null"`
+
+	Name        string `gorm:"size:100"`               // 房间名称
+	Avatar      string `gorm:"size:500"`               // 房间头像
+	Type        uint8  `gorm:"type:tinyint;default:1"` // 类型: 1-私聊 2-群聊
+	CreatorID   uint64 `gorm:"index"`                  // 创建者 ID
+	Description string `gorm:"size:500"`               // 描述
+	MemberLimit int    `gorm:"default:200"`            // 成员上限
+	IsEncrypted bool   `gorm:"default:false"`          // 是否端到端加密
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	DeletedAt   gorm.DeletedAt `gorm:"index"`
 
 	// 关联关系
 	Creator   User       `gorm:"foreignKey:CreatorID"`
-	RoomUsers []RoomUser `gorm:"foreignKey:RoomID"`
-	Messages  []Message  `gorm:"foreignKey:RoomID"`
+	RoomUsers []RoomUser `gorm:"foreignKey:RoomID;references:ID"`
+	Messages  []Message  `gorm:"foreignKey:RoomID;references:ID"`
 }
 
 func (Room) TableName() string {
@@ -137,7 +128,7 @@ func (Room) TableName() string {
 // RoomUser 房间成员表
 type RoomUser struct {
 	ID         uint64     `gorm:"primarykey"`
-	RoomID     uint64     `gorm:"index:idx_room_user,unique;not null"` // 房间 ID
+	RoomID     uint64     `gorm:"index:idx_room_user,unique;not null"` // 房间 ID (对应 Room.ID)
 	UserID     uint64     `gorm:"index:idx_room_user,unique;not null"` // 用户 ID
 	Role       uint8      `gorm:"type:tinyint;default:0"`              // 角色: 0-普通成员 1-管理员 2-群主
 	Nickname   string     `gorm:"size:100"`                            // 在群里的昵称
@@ -149,7 +140,7 @@ type RoomUser struct {
 	UpdatedAt  time.Time
 
 	// 关联关系
-	Room Room `gorm:"foreignKey:RoomID"`
+	Room Room `gorm:"foreignKey:RoomID;references:ID"`
 	User User `gorm:"foreignKey:UserID"`
 }
 
@@ -159,23 +150,23 @@ func (RoomUser) TableName() string {
 
 // Message 消息表
 type Message struct {
-	ID           uint64  `gorm:"primarykey"`
-	MessageID    string  `gorm:"size:32;uniqueIndex;not null"` // 对外消息 ID
-	RoomID       uint64  `gorm:"index;not null"`               // 房间 ID
-	SenderID     uint64  `gorm:"index;not null"`               // 发送者 ID
-	ReplyToMsgID *uint64 `gorm:"index"`                        // 回复的消息 ID
-	Type         uint8   `gorm:"type:tinyint;default:1"`       // 消息类型: 1-文本 2-图片 3-语音 4-视频 5-文件 6-位置
-	Content      string  `gorm:"type:text;not null"`           // 消息内容
-	Extra        string  `gorm:"type:json"`                    // 扩展信息
-	IsSystem     bool    `gorm:"default:false"`                // 是否为系统消息
-	IsEncrypted  bool    `gorm:"default:false"`                // 是否加密
-	Status       uint8   `gorm:"type:tinyint;default:0"`       // 状态: 0-发送中 1-已发送 2-已送达 3-已读 4-撤回（会在聊天窗口留下痕迹） 5-删除（自己不可见） 6/7-双删（Sender/非Sender删除)在私聊中互相可以删除，但在群中你只能删除自己的，已经管理员进行删除
+	ID uint64 `gorm:"primarykey"`
+	//MessageID    string  `gorm:"size:36;uniqueIndex;not null"` // 对外消息 ID
+	RoomID       uint64         `gorm:"index;not null"`         // 房间 ID (对应 Room.ID)
+	SenderID     uint64         `gorm:"index;not null"`         // 发送者 ID
+	ReplyToMsgID *uint64        `gorm:"index"`                  // 回复的消息 ID
+	Type         uint8          `gorm:"type:tinyint;default:1"` // 消息类型: 1-文本 2-图片 3-语音 4-视频 5-文件 6-位置
+	Content      string         `gorm:"type:text;not null"`     // 消息内容
+	Extra        datatypes.JSON `gorm:"column:extra;type:json"`
+	IsSystem     bool           `gorm:"default:false"`          // 是否为系统消息
+	IsEncrypted  bool           `gorm:"default:false"`          // 是否加密
+	Status       uint8          `gorm:"type:tinyint;default:0"` // 状态: 0-发送中 1-已发送 2-已送达 3-已读 4-撤回（会在聊天窗口留下痕迹） 5-删除（自己不可见） 6/7-双删（Sender/非Sender删除)在私聊中互相可以删除，但在群中你只能删除自己的，已经管理员进行删除
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    gorm.DeletedAt `gorm:"index"`
 
 	// 关联关系
-	Room    Room     `gorm:"foreignKey:RoomID"`
+	Room    Room     `gorm:"foreignKey:RoomID;references:ID"`
 	Sender  User     `gorm:"foreignKey:SenderID"`
 	ReplyTo *Message `gorm:"foreignKey:ReplyToMsgID"`
 }
@@ -219,7 +210,7 @@ func (MessageStatus) TableName() string {
 type Conversation struct {
 	ID            uint64  `gorm:"primarykey"`
 	UserID        uint64  `gorm:"index:idx_user_room,unique;not null"` // 用户 ID
-	RoomID        uint64  `gorm:"index:idx_user_room,unique;not null"` // 房间 ID
+	RoomID        uint64  `gorm:"index:idx_user_room,unique;not null"` // 房间 ID (对应 Room.ID)
 	LastMessageID *uint64 `gorm:"index"`                               // 最后一条消息 ID
 	UnreadCount   uint64  `gorm:"default:0"`                           // 未读消息数
 	IsMuted       bool    `gorm:"default:false"`                       // 是否免打扰
@@ -230,7 +221,7 @@ type Conversation struct {
 
 	// 关联关系
 	User        User     `gorm:"foreignKey:UserID"`
-	Room        Room     `gorm:"foreignKey:RoomID"`
+	Room        Room     `gorm:"foreignKey:RoomID;references:ID"`
 	LastMessage *Message `gorm:"foreignKey:LastMessageID"`
 	LastReadMsg *Message `gorm:"foreignKey:LastReadMsgID"`
 }

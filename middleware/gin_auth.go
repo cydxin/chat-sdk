@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -75,6 +76,7 @@ func GinAuthMiddleware(auth *service.AuthService, opt *AuthOptions) gin.HandlerF
 		if ah != "" {
 			parts := strings.SplitN(ah, " ", 2)
 			if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+				fmt.Println(parts[1])
 				token = strings.TrimSpace(parts[1])
 			}
 		}

@@ -21,6 +21,7 @@ type ChatEngine struct {
 	MsgService    *service.MessageService
 	MemberService *service.MemberService
 	AuthService   *service.AuthService // 鉴权服务
+	MomentService *service.MomentService
 	WsServer      *WsServer
 }
 
@@ -61,6 +62,7 @@ func NewEngine(opts ...Option) *ChatEngine {
 		Instance.RoomService = service.NewRoomService(baseService)
 		Instance.MsgService = service.NewMessageService(baseService)
 		Instance.MemberService = service.NewMemberService(baseService)
+		Instance.MomentService = service.NewMomentService(baseService)
 		Instance.AuthService = service.NewAuthService(c.RDB) // 初始化鉴权服务
 
 		// 迁移表
@@ -76,31 +78,42 @@ func NewEngine(opts ...Option) *ChatEngine {
 				log.Printf("Invalid message format: %v", err)
 				return
 			}
+			log.Printf("Received message: %s", msg)
+			// 1. 通过 RoomAccount（字符串）查找房间
+			room, err := Instance.RoomService.GetRoomByID(req.SendTo)
+			if err != nil {
+				log.Printf("Room not found: %s, error: %v", req.SendTo, err)
+				return
+			}
 
+			// 2. 使用 Room.ID（数字）保存消息
 			var senderID uint64
 			senderID = client.UserID
-			savedMsg, err := Instance.MsgService.SaveMessage(req.SendTo, senderID, req.SendContent, req.SendType)
+			savedMsg, err := Instance.MsgService.SaveMessage(room.ID, senderID, req.SendContent, req.SendType)
 			if err != nil {
 				log.Printf("Failed to save message: %v", err)
 				return
 			}
 
-			members, err := Instance.RoomService.GetRoomMembers(req.SendTo)
+			// 3. 获取房间成员（使用 Room.ID）
+			members, err := Instance.RoomService.GetRoomMembers(room.ID)
 			if err != nil {
 				log.Printf("Failed to get room members: %v", err)
 				return
 			}
+			log.Printf("members : %s", members)
 
+			// 4. 构建响应消息
 			resp := struct {
 				ID        uint64    `json:"id"`
-				RoomID    uint64    `json:"room_id"`
+				RoomID    string    `json:"room_id"` // 返回对外房间号/群号（兼容字段名）
 				SenderID  uint64    `json:"sender_id"`
 				MsgType   uint8     `json:"msg_type"`
 				Content   string    `json:"content"`
 				CreatedAt time.Time `json:"created_at"`
 			}{
 				ID:        savedMsg.ID,
-				RoomID:    savedMsg.RoomID,
+				RoomID:    room.RoomAccount,
 				SenderID:  savedMsg.SenderID,
 				MsgType:   savedMsg.Type,
 				Content:   savedMsg.Content,
@@ -109,7 +122,12 @@ func NewEngine(opts ...Option) *ChatEngine {
 
 			respBytes, _ := json.Marshal(resp)
 
+			// 5. 推送给所有房间成员
 			for _, memberID := range members {
+				log.Printf("Push message to member: %d", memberID)
+				if memberID == senderID {
+					continue
+				}
 				Instance.WsServer.SendToUser(uint64(memberID), respBytes)
 			}
 		}
@@ -122,8 +140,6 @@ func NewEngine(opts ...Option) *ChatEngine {
 func (c *ChatEngine) AutoMigrate() error {
 	db := c.config.DB
 	log.Println("AutoMigrate...")
-
-	// 需要外键约束，建议配在gorm init的时候，这样的话这里就不用引gorm进来
 	return db.AutoMigrate(
 		&model.User{},
 		&model.Room{},
@@ -133,7 +149,11 @@ func (c *ChatEngine) AutoMigrate() error {
 		&model.RoomUser{},
 		&model.Message{},
 		&model.Conversation{},
+		&model.Moment{},
+		&model.MomentMedia{},
+		&model.MomentComment{},
 	)
+
 }
 
 /*

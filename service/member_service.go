@@ -2,12 +2,14 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"time"
 
 	"github.com/cydxin/chat-sdk/models"
+	"gorm.io/gorm"
 )
 
 type MemberService struct {
@@ -24,18 +26,20 @@ func (s *MemberService) SendFriendRequest(fromUser, toUser uint64, message strin
 	if fromUser == toUser {
 		return fmt.Errorf("不能添加自己为好友")
 	}
-
+	log.Println(1)
 	// 检查是否已经是好友
 	isFriend, _ := s.CheckFriendship(fromUser, toUser)
 	if isFriend {
 		return fmt.Errorf("已经是好友关系")
 	}
+	log.Println(2)
 
 	// 检查是否已经发送过申请
 	var existingRequest models.FriendApply
 	err := s.DB.Model(&models.FriendApply{}).
 		Where("from_user_id = ? AND to_user_id = ? AND status = ?", fromUser, toUser, models.StatusPending).
 		First(&existingRequest).Error
+	log.Println(3)
 
 	if err == nil {
 		return fmt.Errorf("已经发送过好友申请，请等待对方回应")
@@ -50,8 +54,11 @@ func (s *MemberService) SendFriendRequest(fromUser, toUser uint64, message strin
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}
+	log.Println(4)
 
 	err = s.DB.Create(request).Error
+	log.Println(5)
+
 	if err != nil {
 		return err
 	}
@@ -67,14 +74,21 @@ func (s *MemberService) SendFriendRequest(fromUser, toUser uint64, message strin
 		notifBytes, _ := json.Marshal(notification)
 		s.WsNotifier(toUser, notifBytes)
 	}
+	log.Println(6)
 
 	return nil
 }
 
 // AcceptFriendRequest 同意好友申请
 func (s *MemberService) AcceptFriendRequest(requestID uint64, userID uint64) error {
+	tx := s.DB.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	defer tx.Rollback() // 确保事务在函数退出时回滚（如果未提交）
+
 	var request models.FriendApply
-	err := s.DB.First(&request, requestID).Error
+	err := tx.First(&request, requestID).Error
 	if err != nil {
 		return err
 	}
@@ -88,37 +102,96 @@ func (s *MemberService) AcceptFriendRequest(requestID uint64, userID uint64) err
 		return fmt.Errorf("该申请已处理")
 	}
 
-	tx := s.DB.Begin()
-
-	// 更新申请状态
+	// 更新申请状态 (使用乐观锁：Where status = Pending)
 	now := time.Now()
-	err = tx.Model(&request).
+	result := tx.Model(&models.FriendApply{}).
+		Where("id = ? AND status = ?", requestID, models.StatusPending).
 		Updates(map[string]interface{}{
 			"status":       models.StatusAgreed,
 			"updated_at":   now,
 			"processed_at": &now,
-		}).Error
-	if err != nil {
-		tx.Rollback()
+		})
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("该申请已被处理")
+	}
+
+	// 创建好友关系 (双向)
+	friends := []models.Friend{
+		{
+			UserID:    request.FromUserID,
+			FriendID:  request.ToUserID,
+			Status:    1, // 正常
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		{
+			UserID:    request.ToUserID,
+			FriendID:  request.FromUserID,
+			Status:    1, // 正常
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+	}
+
+	if err := tx.Create(&friends).Error; err != nil {
 		return err
 	}
 
-	// 创建好友关系
-	friendship := &models.Friend{
-		UserID:    request.FromUserID,
-		FriendID:  request.ToUserID,
-		Status:    1, // 正常
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
+	// 创建私聊房间（使用规则生成 RoomAccount）
+	roomAccount := generatePrivateRoomAccount(request.FromUserID, request.ToUserID)
 
-	err = tx.Create(friendship).Error
-	if err != nil {
-		tx.Rollback()
+	// 检查房间是否已存在
+	var existingRoom models.Room
+	err = tx.Where("room_account = ?", roomAccount).First(&existingRoom).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
 
-	tx.Commit()
+	// 如果房间不存在，则创建
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		room := &models.Room{
+			RoomAccount: roomAccount,
+			Type:        1, // 1-私聊
+			CreatorID:   request.FromUserID,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+		if err := tx.Create(room).Error; err != nil {
+			return err
+		}
+
+		// 添加房间成员
+		members := []models.RoomUser{
+			{
+				RoomID:    room.ID,
+				UserID:    request.FromUserID,
+				Role:      0,
+				JoinTime:  now,
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+			{
+				RoomID:    room.ID,
+				UserID:    request.ToUserID,
+				Role:      0,
+				JoinTime:  now,
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+		}
+		if err := tx.Create(&members).Error; err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
 
 	// 通知申请者
 	if s.WsNotifier != nil {
@@ -136,9 +209,15 @@ func (s *MemberService) AcceptFriendRequest(requestID uint64, userID uint64) err
 
 // RejectFriendRequest 拒绝好友申请
 func (s *MemberService) RejectFriendRequest(requestID uint64, userID uint64) error {
+	tx := s.DB.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	defer tx.Rollback()
+
 	var request models.FriendApply
-	err := s.DB.First(&request, requestID).Error
-	if err != nil {
+	// 移除 FOR UPDATE
+	if err := tx.First(&request, requestID).Error; err != nil {
 		return err
 	}
 
@@ -151,16 +230,25 @@ func (s *MemberService) RejectFriendRequest(requestID uint64, userID uint64) err
 		return fmt.Errorf("该申请已处理")
 	}
 
-	// 更新申请状态
+	// 更新申请状态 (使用乐观锁)
 	now := time.Now()
-	err = s.DB.Model(&request).
+	result := tx.Model(&models.FriendApply{}).
+		Where("id = ? AND status = ?", requestID, models.StatusPending).
 		Updates(map[string]interface{}{
 			"status":       models.StatusRefused,
 			"updated_at":   now,
 			"processed_at": &now,
-		}).Error
+		})
 
-	if err != nil {
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("该申请已被处理")
+	}
+
+	if err := tx.Commit().Error; err != nil {
 		return err
 	}
 
@@ -230,6 +318,7 @@ func (s *MemberService) GetPendingRequests(userID uint64) ([]models.FriendApply,
 	var requests []models.FriendApply
 	err := s.DB.Model(&models.FriendApply{}).
 		Where("to_user_id = ? AND status = ?", userID, models.StatusPending).
+		Preload("FromUser").
 		Order("created_at DESC").
 		Find(&requests).Error
 	return requests, err

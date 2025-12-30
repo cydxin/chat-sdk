@@ -94,8 +94,9 @@ definitions:
       deletedAt:
         $ref: '#/definitions/gorm.DeletedAt'
       extra:
-        description: 扩展信息
-        type: string
+        items:
+          type: integer
+        type: array
       id:
         type: integer
       isEncrypted:
@@ -104,9 +105,6 @@ definitions:
       isSystem:
         description: 是否为系统消息
         type: boolean
-      messageID:
-        description: 对外消息 ID
-        type: string
       replyTo:
         $ref: '#/definitions/models.Message'
       replyToMsgID:
@@ -117,7 +115,8 @@ definitions:
         - $ref: '#/definitions/models.Room'
         description: 关联关系
       roomID:
-        description: 房间 ID
+        description: MessageID    string  `gorm:"size:36;uniqueIndex;not null"` //
+          对外消息 ID
         type: integer
       sender:
         $ref: '#/definitions/models.User'
@@ -167,8 +166,10 @@ definitions:
       name:
         description: 房间名称
         type: string
-      roomID:
-        description: 对外房间 ID
+      roomAccount:
+        description: |-
+          RoomAccount 对外房间号/群号（可用 10 位数字字符串或自定义规则），用于搜索/分享；
+          不参与任何外键关联，避免再被 GORM 推断成 bigint。
         type: string
       roomUsers:
         items:
@@ -209,7 +210,7 @@ definitions:
         - $ref: '#/definitions/models.Room'
         description: 关联关系
       roomID:
-        description: 房间 ID
+        description: 房间 ID (对应 Room.ID)
         type: integer
       updatedAt:
         type: string
@@ -300,6 +301,34 @@ definitions:
         example: success
         type: string
     type: object
+  service.CommentDTO:
+    properties:
+      content:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      moment_id:
+        type: integer
+      parent_id:
+        type: integer
+      user_id:
+        type: integer
+    type: object
+  service.CreateMomentReq:
+    properties:
+      images:
+        description: 最多9张
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+      video:
+        description: 单个视频URL
+        type: string
+    type: object
   service.LoginReq:
     properties:
       account:
@@ -323,7 +352,9 @@ definitions:
       created_at:
         type: string
       extra:
-        type: string
+        items:
+          type: integer
+        type: array
       id:
         type: integer
       is_encrypted:
@@ -343,6 +374,37 @@ definitions:
       type:
         type: integer
       updated_at:
+        type: string
+    type: object
+  service.MomentDTO:
+    properties:
+      comments_cnt:
+        type: integer
+      created_at:
+        type: string
+      id:
+        type: integer
+      images_count:
+        type: integer
+      media_type:
+        type: integer
+      medias:
+        items:
+          $ref: '#/definitions/service.MomentMediaDTO'
+        type: array
+      title:
+        type: string
+      user_id:
+        type: integer
+    type: object
+  service.MomentMediaDTO:
+    properties:
+      sort:
+        type: integer
+      type:
+        description: 1-图片 2-视频
+        type: integer
+      url:
         type: string
     type: object
   service.RegisterReq:
@@ -433,12 +495,12 @@ paths:
       - application/json
       description: 同意指定的好友申请
       parameters:
-      - description: 申请信息（request_id, user_id）
-        in: body
-        name: req
+      - description: 申请ID
+        format: int64
+        in: query
+        name: request_id
         required: true
-        schema:
-          type: object
+        type: integer
       produces:
       - application/json
       responses:
@@ -463,18 +525,12 @@ paths:
     get:
       consumes:
       - application/json
-      description: 检查两个用户是否是好友
+      description: 检查当前用户与目标用户是否是好友
       parameters:
-      - description: 用户1 ID
+      - description: 目标用户 ID
         format: int64
         in: query
-        name: user1
-        required: true
-        type: integer
-      - description: 用户2 ID
-        format: int64
-        in: query
-        name: user2
+        name: target_id
         required: true
         type: integer
       produces:
@@ -510,12 +566,12 @@ paths:
       - application/json
       description: 删除好友关系
       parameters:
-      - description: 好友信息（user1, user2）
-        in: body
-        name: req
+      - description: 好友ID
+        format: int64
+        in: query
+        name: friend_id
         required: true
-        schema:
-          type: object
+        type: integer
       produces:
       - application/json
       responses:
@@ -540,14 +596,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取用户的好友列表
-      parameters:
-      - description: 用户ID
-        format: int64
-        in: query
-        name: user_id
-        required: true
-        type: integer
+      description: 获取当前用户的好友列表
       produces:
       - application/json
       responses:
@@ -579,14 +628,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取用户待处理的好友申请列表
-      parameters:
-      - description: 用户ID
-        format: int64
-        in: query
-        name: user_id
-        required: true
-        type: integer
+      description: 获取当前用户待处理的好友申请列表
       produces:
       - application/json
       responses:
@@ -620,12 +662,12 @@ paths:
       - application/json
       description: 拒绝指定的好友申请
       parameters:
-      - description: 申请信息（request_id, user_id）
-        in: body
-        name: req
+      - description: 申请ID
+        format: int64
+        in: query
+        name: request_id
         required: true
-        schema:
-          type: object
+        type: integer
       produces:
       - application/json
       responses:
@@ -652,7 +694,7 @@ paths:
       - application/json
       description: 向目标用户发送好友申请
       parameters:
-      - description: 好友申请（from_user, to_user, message）
+      - description: 好友申请（to_user, message）
         in: body
         name: req
         required: true
@@ -678,6 +720,39 @@ paths:
       summary: 发送好友申请
       tags:
       - 好友
+  /member/search:
+    get:
+      consumes:
+      - application/json
+      description: 搜索用户，返回ID列表
+      parameters:
+      - description: 搜索关键字
+        in: query
+        name: keyword
+        type: string
+      - description: 返回条数
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 用户ID列表
+          schema:
+            items:
+              format: int64
+              type: integer
+            type: array
+        "500":
+          description: 服务器错误
+          schema:
+            type: string
+      security:
+      - BearerAuth: []
+      summary: 搜索用户 (Member)
+      tags:
+      - 用户
   /message/detail:
     get:
       consumes:
@@ -768,12 +843,18 @@ paths:
       - application/json
       description: 撤回指定消息
       parameters:
-      - description: 撤回信息（message_id, user_id）
-        in: body
-        name: req
+      - description: 消息ID
+        format: int64
+        in: query
+        name: message_id
         required: true
-        schema:
-          type: object
+        type: integer
+      - description: '4-撤回（会在聊天窗口留下痕迹） 5-删除（自己不可见） 6/7-双删（Sender/非Sender删除)在私聊中互相可以删除，但在群中你只能删除自己的，已经管理员进行删除 '
+        format: int32
+        in: query
+        name: status
+        required: true
+        type: integer
       produces:
       - application/json
       responses:
@@ -794,13 +875,158 @@ paths:
       summary: 撤回消息
       tags:
       - 消息
+  /moment/comment/add:
+    post:
+      consumes:
+      - application/json
+      description: 对动态发表评论，或对评论进行二级回复
+      parameters:
+      - description: 评论内容（moment_id, content, parent_id 可选）
+        in: body
+        name: req
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "401":
+          description: 未登录
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 发表评论或回复
+      tags:
+      - 朋友圈
+  /moment/comment/list:
+    get:
+      consumes:
+      - application/json
+      description: 获取某条动态下的评论（时间升序）
+      parameters:
+      - description: 动态ID
+        format: int64
+        in: query
+        name: moment_id
+        required: true
+        type: integer
+      - description: 每页数量
+        in: query
+        name: limit
+        type: integer
+      - description: 偏移量
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 评论列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/service.CommentDTO'
+                  type: array
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 获取评论列表
+      tags:
+      - 朋友圈
+  /moment/create:
+    post:
+      consumes:
+      - application/json
+      description: 标题 + 图片(最多9张) 或 视频(1个)
+      parameters:
+      - description: 动态内容（title, images(最多9) 或 video 二选一）
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/service.CreateMomentReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 创建成功
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.MomentDTO'
+              type: object
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "401":
+          description: 未登录
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 发布朋友圈动态
+      tags:
+      - 朋友圈
+  /moment/list:
+    get:
+      consumes:
+      - application/json
+      description: 获取自己与好友发布的动态（按时间倒序）
+      parameters:
+      - description: 每页数量
+        in: query
+        name: limit
+        type: integer
+      - description: 偏移量
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 动态列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/service.MomentDTO'
+                  type: array
+              type: object
+        "401":
+          description: 未登录
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 朋友圈动态列表
+      tags:
+      - 朋友圈
   /room/group:
     post:
       consumes:
       - application/json
       description: 创建新的群聊房间
       parameters:
-      - description: 群聊信息（name, creator, members）
+      - description: 群聊信息（name, members）
         in: body
         name: req
         required: true
@@ -835,14 +1061,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取用户参与的所有房间
-      parameters:
-      - description: 用户ID
-        format: int64
-        in: query
-        name: user_id
-        required: true
-        type: integer
+      description: 获取当前用户参与的所有房间
       produces:
       - application/json
       responses:
@@ -876,12 +1095,18 @@ paths:
       - application/json
       description: 将用户添加到房间
       parameters:
-      - description: 成员信息（room_id, user_id, operator_id）
-        in: body
-        name: req
+      - description: 房间ID
+        format: int64
+        in: query
+        name: room_id
         required: true
-        schema:
-          type: object
+        type: integer
+      - description: 用户ID
+        format: int64
+        in: query
+        name: user_id
+        required: true
+        type: integer
       produces:
       - application/json
       responses:
@@ -906,7 +1131,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 检查用户是否是房间成员
+      description: 检查用户是否是房间成员，如果不传 user_id 则检查当前用户
       parameters:
       - description: 房间ID
         format: int64
@@ -914,11 +1139,10 @@ paths:
         name: room_id
         required: true
         type: integer
-      - description: 用户ID
+      - description: 用户ID (不传则查自己)
         format: int64
         in: query
         name: user_id
-        required: true
         type: integer
       produces:
       - application/json
@@ -953,12 +1177,18 @@ paths:
       - application/json
       description: 将用户从房间移除
       parameters:
-      - description: 成员信息（room_id, user_id, operator_id）
-        in: body
-        name: req
+      - description: 房间ID
+        format: int64
+        in: query
+        name: room_id
         required: true
-        schema:
-          type: object
+        type: integer
+      - description: 用户ID
+        format: int64
+        in: query
+        name: user_id
+        required: true
+        type: integer
       produces:
       - application/json
       responses:
@@ -985,12 +1215,12 @@ paths:
       - application/json
       description: 创建或获取两人私聊房间
       parameters:
-      - description: 私聊信息（user_id, target_id）
-        in: body
-        name: req
+      - description: 目标用户ID
+        format: int64
+        in: query
+        name: target_id
         required: true
-        schema:
-          type: object
+        type: integer
       produces:
       - application/json
       responses:
@@ -1020,9 +1250,9 @@ paths:
     post:
       consumes:
       - application/json
-      description: 更新用户头像 URL
+      description: 更新当前用户头像 URL
       parameters:
-      - description: 头像更新（user_id + avatar）
+      - description: 头像更新（avatar）
         in: body
         name: req
         required: true
@@ -1053,26 +1283,18 @@ paths:
     get:
       consumes:
       - application/json
-      description: |-
-        根据 user_id 查询用户详情
-
-        业务状态码说明:
-        - code=0: 查询成功
-        - code=10001: 参数错误（user_id 无效）
-        - code=10002: 用户不存在
-        - code=10004: Token 无效（返回 HTTP 401）
+      description: 根据 user_id 查询用户详情，如果不传 user_id 则查询当前登录用户
       parameters:
-      - description: 用户ID
+      - description: 用户ID (不传则查自己)
         format: int64
         in: query
         name: user_id
-        required: true
         type: integer
       produces:
       - application/json
       responses:
         "200":
-          description: 查询成功 (code=0)
+          description: 查询成功
           schema:
             allOf:
             - $ref: '#/definitions/response.Response'
@@ -1081,20 +1303,15 @@ paths:
                   $ref: '#/definitions/service.UserDTO'
               type: object
         "400":
-          description: 参数错误 (code=10001)
+          description: 参数错误
           schema:
             $ref: '#/definitions/response.Response'
         "401":
-          description: 未登录或Token无效 (code=10004)
-          schema:
-            $ref: '#/definitions/response.Response'
-        "404":
-          description: 用户不存在 (code=10002)
+          description: 未登录
           schema:
             $ref: '#/definitions/response.Response'
       security:
       - BearerAuth: []
-      - QueryToken: []
       summary: 获取用户信息
       tags:
       - 用户
@@ -1133,9 +1350,9 @@ paths:
     post:
       consumes:
       - application/json
-      description: 修改用户密码（验证码/鉴权由调用层保证）
+      description: 修改当前用户密码（验证码/鉴权由调用层保证）
       parameters:
-      - description: 密码修改（user_id + new_password）
+      - description: 密码修改（new_password）
         in: body
         name: req
         required: true
@@ -1187,17 +1404,12 @@ paths:
     get:
       consumes:
       - application/json
-      description: 按关键字搜索用户（username/nickname/uid）
+      description: 按关键字搜索用户（username/nickname/uid），自动排除当前用户
       parameters:
       - description: 搜索关键字
         in: query
         name: keyword
         type: string
-      - description: 排除的用户ID
-        format: int64
-        in: query
-        name: user_id
-        type: integer
       - description: 返回条数
         in: query
         name: limit
@@ -1233,9 +1445,9 @@ paths:
     post:
       consumes:
       - application/json
-      description: 更新用户资料（昵称/签名/性别等）
+      description: 更新当前用户资料（昵称/签名/性别等）
       parameters:
-      - description: 更新信息（user_id + 可选字段）
+      - description: 更新信息（可选字段）
         in: body
         name: req
         required: true

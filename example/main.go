@@ -74,33 +74,33 @@ func main() {
 	// 消息模块
 	userAPI := api.Group("/user")
 	{
-		userAPI.POST("/register", gin.WrapH(engine.HandleUserRegister()))
-		userAPI.POST("/login", gin.WrapH(engine.HandleUserLogin()))
-		userAPI.GET("/info", gin.WrapH(engine.HandleGetUserInfo()))
-		userAPI.POST("/update", gin.WrapH(engine.HandleUpdateUserInfo()))
-		userAPI.POST("/avatar", gin.WrapH(engine.HandleUpdateUserAvatar()))
-		userAPI.POST("/password", gin.WrapH(engine.HandleUpdateUserPassword()))
-		userAPI.GET("/search", gin.WrapH(engine.HandleSearchUsers()))
+		userAPI.POST("/register", engine.GinHandleUserRegister)
+		userAPI.POST("/login", engine.GinHandleUserLogin)
+		userAPI.GET("/info", engine.GinHandleGetUserInfo)
+		userAPI.POST("/update", engine.GinHandleUpdateUserInfo)
+		userAPI.POST("/avatar", engine.GinHandleUpdateUserAvatar)
+		userAPI.POST("/password", engine.GinHandleUpdateUserPassword)
+		userAPI.GET("/search", engine.GinHandleSearchUsers)
 	}
 
 	// 好友模块
 	friendAPI := api.Group("/friend")
 	{
-		friendAPI.POST("/request", gin.WrapH(engine.HandleSendFriendRequest()))
-		friendAPI.POST("/accept", gin.WrapH(engine.HandleAcceptFriendRequest()))
-		friendAPI.POST("/reject", gin.WrapH(engine.HandleRejectFriendRequest()))
-		friendAPI.DELETE("/delete", gin.WrapH(engine.HandleDeleteFriend()))
-		friendAPI.GET("/list", gin.WrapH(engine.HandleGetFriendList()))
-		friendAPI.GET("/pending", gin.WrapH(engine.HandleGetPendingRequests()))
+		friendAPI.POST("/request", engine.GinHandleSendFriendRequest)
+		friendAPI.POST("/accept", engine.GinHandleAcceptFriendRequest)
+		friendAPI.POST("/reject", engine.GinHandleRejectFriendRequest)
+		friendAPI.DELETE("/delete", engine.GinHandleDeleteFriend)
+		friendAPI.GET("/list", engine.GinHandleGetFriendList)
+		friendAPI.GET("/pending", engine.GinHandleGetPendingRequests)
 	}
 
 	// 房间模块
 	roomAPI := api.Group("/room")
 	{
-		roomAPI.POST("/private", gin.WrapH(engine.HandleCreatePrivateRoom()))
-		roomAPI.POST("/group", gin.WrapH(engine.HandleCreateGroupRoom()))
-		roomAPI.POST("/member/add", gin.WrapH(engine.HandleAddRoomMember()))
-		roomAPI.POST("/member/remove", gin.WrapH(engine.HandleRemoveRoomMember()))
+		roomAPI.POST("/private", engine.GinHandleCreatePrivateRoom)
+		roomAPI.POST("/group", engine.GinHandleCreateGroupRoom)
+		roomAPI.POST("/member/add", engine.GinHandleAddRoomMember)
+		roomAPI.POST("/member/remove", engine.GinHandleRemoveRoomMember)
 	}
 
 	// 6. 启动服务器
