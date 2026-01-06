@@ -81,6 +81,7 @@ func (s *MemberService) SendFriendRequest(fromUser, toUser uint64, message strin
 
 // AcceptFriendRequest 同意好友申请
 func (s *MemberService) AcceptFriendRequest(requestID uint64, userID uint64) error {
+	log.Println(requestID, userID)
 	tx := s.DB.Begin()
 	if tx.Error != nil {
 		return tx.Error
@@ -187,6 +188,32 @@ func (s *MemberService) AcceptFriendRequest(requestID uint64, userID uint64) err
 		if err := tx.Create(&members).Error; err != nil {
 			return err
 		}
+
+		// 新建房间时：确保双方会话可见
+		for _, uid := range []uint64{request.FromUserID, request.ToUserID} {
+			conv := &models.Conversation{UserID: uid, RoomID: room.ID}
+			if err := tx.FirstOrCreate(conv, map[string]any{"user_id": uid, "room_id": room.ID}).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&models.Conversation{}).
+				Where("user_id = ? AND room_id = ?", uid, room.ID).
+				Updates(map[string]any{"is_visible": true, "updated_at": now}).Error; err != nil {
+				return err
+			}
+		}
+	} else {
+		// 房间已存在（通常是删好友后再加回来）：确保双方会话重新展示
+		for _, uid := range []uint64{request.FromUserID, request.ToUserID} {
+			conv := &models.Conversation{UserID: uid, RoomID: existingRoom.ID}
+			if err := tx.FirstOrCreate(conv, map[string]any{"user_id": uid, "room_id": existingRoom.ID}).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&models.Conversation{}).
+				Where("user_id = ? AND room_id = ?", uid, existingRoom.ID).
+				Updates(map[string]any{"is_visible": true, "updated_at": now}).Error; err != nil {
+				return err
+			}
+		}
 	}
 
 	if err := tx.Commit().Error; err != nil {
@@ -216,7 +243,7 @@ func (s *MemberService) RejectFriendRequest(requestID uint64, userID uint64) err
 	defer tx.Rollback()
 
 	var request models.FriendApply
-	// 移除 FOR UPDATE
+
 	if err := tx.First(&request, requestID).Error; err != nil {
 		return err
 	}
@@ -268,11 +295,34 @@ func (s *MemberService) RejectFriendRequest(requestID uint64, userID uint64) err
 
 // DeleteFriend 删除好友
 func (s *MemberService) DeleteFriend(user1, user2 uint64) error {
-	// 删除双向关系
-	err := s.DB.Where("(user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)", user1, user2, user2, user1).
-		Delete(&models.Friend{}).Error
+	// 以事务保证：删好友 + 隐藏会话 一致
+	tx := s.DB.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	defer tx.Rollback()
 
-	if err != nil {
+	// 1) 删除双向好友关系
+	if err := tx.Where("(user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)", user1, user2, user2, user1).
+		Delete(&models.Friend{}).Error; err != nil {
+		return err
+	}
+
+	// 2) 找到两人的私聊房间，并把对应会话隐藏（仅隐藏这一个房间的会话）
+	roomAccount := generatePrivateRoomAccount(user1, user2)
+	var room models.Room
+	if err := tx.Model(&models.Room{}).
+		Select("id").
+		Where("room_account = ? AND type = ?", roomAccount, 1).
+		First(&room).Error; err == nil {
+		if err := tx.Model(&models.Conversation{}).
+			Where("room_id = ? AND user_id IN ?", room.ID, []uint64{user1, user2}).
+			Updates(map[string]any{"is_visible": false}).Error; err != nil {
+			return err
+		}
+	}
+
+	if err := tx.Commit().Error; err != nil {
 		return err
 	}
 
@@ -281,6 +331,7 @@ func (s *MemberService) DeleteFriend(user1, user2 uint64) error {
 		notification := map[string]interface{}{
 			"type":    "friend_deleted",
 			"user_id": user1,
+			"room_id": room.ID,
 		}
 		notifBytes, _ := json.Marshal(notification)
 		s.WsNotifier(user2, notifBytes)
@@ -305,27 +356,116 @@ func (s *MemberService) CheckFriendship(user1, user2 uint64) (bool, error) {
 }
 
 // GetFriendList 获取好友列表
-func (s *MemberService) GetFriendList(userID uint64) ([]uint64, error) {
-	var friends []uint64
+func (s *MemberService) GetFriendList(userID uint64) ([]UserDTO, error) {
+	var friends []models.Friend
 	err := s.DB.Model(&models.Friend{}).
 		Where("user_id = ? AND status = ?", userID, 1).
-		Pluck("friend_id", &friends).Error
-	return friends, err
+		Preload("Friend").
+		Find(&friends).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	dtos := make([]UserDTO, len(friends))
+	roomAccounts := make([]string, 0, len(friends))
+	accountToIndex := make(map[string]int, len(friends))
+
+	for i, f := range friends {
+		dtos[i] = UserDTO{
+			ID:           f.Friend.ID,
+			UID:          f.Friend.UID,
+			Username:     f.Friend.Username,
+			Nickname:     f.Friend.Nickname,
+			Remark:       f.Remark,
+			Avatar:       f.Friend.Avatar,
+			Phone:        f.Friend.Phone,
+			Email:        f.Friend.Email,
+			Gender:       f.Friend.Gender,
+			Birthday:     f.Friend.Birthday,
+			Signature:    f.Friend.Signature,
+			OnlineStatus: f.Friend.OnlineStatus,
+			LastLoginAt:  f.Friend.LastLoginAt,
+			LastActiveAt: f.Friend.LastActiveAt,
+			CreatedAt:    f.Friend.CreatedAt,
+			UpdatedAt:    f.Friend.UpdatedAt,
+		}
+
+		acc := generatePrivateRoomAccount(userID, f.Friend.ID)
+		roomAccounts = append(roomAccounts, acc)
+		accountToIndex[acc] = i
+	}
+
+	// 批量查询私聊房间
+	if len(roomAccounts) > 0 {
+		var rooms []models.Room
+		_ = s.DB.Model(&models.Room{}).
+			Select("id, room_account").
+			Where("room_account IN ?", roomAccounts).
+			Find(&rooms).Error
+
+		for _, r := range rooms {
+			if idx, ok := accountToIndex[r.RoomAccount]; ok {
+				dtos[idx].RoomID = r.ID
+				dtos[idx].RoomAccount = r.RoomAccount
+			}
+		}
+	}
+
+	return dtos, nil
 }
 
-// GetPendingRequests 获取待处理的好友申请
-func (s *MemberService) GetPendingRequests(userID uint64) ([]models.FriendApply, error) {
+// UserBasicDTO 用户基本信息DTO
+type UserBasicDTO struct {
+	ID       uint64 `json:"id"`
+	Username string `json:"username"`
+	Nickname string `json:"nickname"`
+	Avatar   string `json:"avatar"`
+}
+
+// FriendApplyDTO 好友申请DTO
+type FriendApplyDTO struct {
+	ID        uint64       `json:"id"`
+	FromUser  UserBasicDTO `json:"from_user"`
+	Reason    string       `json:"reason"`
+	Status    uint8        `json:"status"`
+	CreatedAt time.Time    `json:"created_at"`
+}
+
+// GetPendingRequests 获取全部的好友申请
+func (s *MemberService) GetPendingRequests(userID uint64) ([]FriendApplyDTO, error) {
 	var requests []models.FriendApply
 	err := s.DB.Model(&models.FriendApply{}).
-		Where("to_user_id = ? AND status = ?", userID, models.StatusPending).
+		Where("to_user_id = ?", userID).
 		Preload("FromUser").
 		Order("created_at DESC").
 		Find(&requests).Error
-	return requests, err
+
+	if err != nil {
+		return nil, err
+	}
+
+	dtos := make([]FriendApplyDTO, len(requests))
+	for i, r := range requests {
+		dtos[i] = FriendApplyDTO{
+			ID: r.ID,
+			FromUser: UserBasicDTO{
+				ID:       r.FromUser.ID,
+				Username: r.FromUser.Username,
+				Nickname: r.FromUser.Nickname,
+				Avatar:   r.FromUser.Avatar,
+			},
+
+			Reason:    r.Reason,
+			Status:    r.Status,
+			CreatedAt: r.CreatedAt,
+		}
+	}
+	return dtos, nil
 }
 
 // SearchUsers 搜索用户：按 username/nickname/uid 模糊匹配，排除自己，返回匹配的 userID 列表。
-func (s *MemberService) SearchUsers(keyword string, currentUserID int64, limit int) ([]uint64, error) {
+func (s *MemberService) SearchUsers(keyword string, currentUserID int64, limit int) ([]UserBasicDTO, error) {
 	keyword = strings.TrimSpace(keyword)
 	if limit <= 0 {
 		limit = 20
@@ -343,13 +483,55 @@ func (s *MemberService) SearchUsers(keyword string, currentUserID int64, limit i
 		q = q.Where("username LIKE ? OR nickname LIKE ? OR uid LIKE ?", like, like, like)
 	}
 
-	var userIDs []uint64
-	err := q.Order("id DESC").Limit(limit).Pluck("id", &userIDs).Error
-	return userIDs, err
+	var users []models.User
+	err := q.Select("id, username, nickname, avatar").
+		Order("id DESC").
+		Limit(limit).
+		Find(&users).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]UserBasicDTO, 0, len(users))
+	for i := range users {
+		u := users[i]
+		out = append(out, UserBasicDTO{ID: u.ID, Username: u.Username, Nickname: u.Nickname, Avatar: u.Avatar})
+	}
+	return out, nil
+}
+
+// -------------------- 好友备注（Friend Remark） --------------------
+
+// SetFriendRemark 设置好友备注（user -> friend 的单向备注）
+func (s *MemberService) SetFriendRemark(userID, friendID uint64, remark string) error {
+	remark = strings.TrimSpace(remark)
+	// 允许清空
+
+	res := s.DB.Model(&models.Friend{}).
+		Where("user_id = ? AND friend_id = ? AND status = ?", userID, friendID, 1).
+		Updates(map[string]any{"remark": remark, "updated_at": time.Now()})
+
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("not friends")
+	}
+	return nil
 }
 
 // AddRoomMember 添加成员到房间（群聊）
-func (s *MemberService) AddRoomMember(roomID uint64, userID uint64, operatorID uint64) error {
+func (s *MemberService) AddRoomMember(roomID uint64, userIDs []uint64, operatorID uint64) error {
+	// 基本校验
+	if roomID == 0 {
+		return fmt.Errorf("room_id is required")
+	}
+	if operatorID == 0 {
+		return fmt.Errorf("operator_id is required")
+	}
+	if len(userIDs) == 0 {
+		return fmt.Errorf("user_ids is required")
+	}
+
 	// 检查操作者是否是管理员
 	var member models.RoomUser
 	err := s.DB.Model(&models.RoomUser{}).
@@ -365,52 +547,83 @@ func (s *MemberService) AddRoomMember(roomID uint64, userID uint64, operatorID u
 		return fmt.Errorf("只有管理员可以添加成员")
 	}
 
-	// 检查用户是否已经是成员
-	var count int64
-	err = s.DB.Model(&models.RoomUser{}).
-		Where("room_id = ? AND user_id = ?", roomID, userID).
-		Count(&count).Error
-
-	if err != nil {
-		return err
+	// 去重 + 过滤掉 operator 自己
+	uniq := make(map[uint64]struct{}, len(userIDs))
+	clean := make([]uint64, 0, len(userIDs))
+	for _, uid := range userIDs {
+		if uid == 0 || uid == operatorID {
+			continue
+		}
+		if _, ok := uniq[uid]; ok {
+			continue
+		}
+		uniq[uid] = struct{}{}
+		clean = append(clean, uid)
+	}
+	if len(clean) == 0 {
+		return fmt.Errorf("no valid user_ids")
 	}
 
-	if count > 0 {
+	// 查询已存在的成员，避免唯一索引冲突
+	var existingIDs []uint64
+	if err := s.DB.Model(&models.RoomUser{}).
+		Where("room_id = ? AND user_id IN ?", roomID, clean).
+		Pluck("user_id", &existingIDs).Error; err != nil {
+		return err
+	}
+	existingSet := make(map[uint64]struct{}, len(existingIDs))
+	for _, id := range existingIDs {
+		existingSet[id] = struct{}{}
+	}
+
+	toAdd := make([]uint64, 0, len(clean))
+	for _, uid := range clean {
+		if _, ok := existingSet[uid]; ok {
+			continue
+		}
+		toAdd = append(toAdd, uid)
+	}
+	if len(toAdd) == 0 {
 		return fmt.Errorf("用户已经是房间成员")
 	}
 
-	// 添加成员
-	newMember := &models.RoomUser{
-		RoomID:    roomID,
-		UserID:    userID,
-		Role:      0, // 普通成员
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	now := time.Now()
+	rows := make([]models.RoomUser, 0, len(toAdd))
+	for _, uid := range toAdd {
+		rows = append(rows, models.RoomUser{
+			RoomID:    roomID,
+			UserID:    uid,
+			Role:      0, // 普通成员
+			JoinTime:  now,
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
 	}
 
-	err = s.DB.Create(newMember).Error
-	if err != nil {
+	// 批量写入
+	if err := s.DB.Create(&rows).Error; err != nil {
 		return err
 	}
 
 	// 通知被添加的用户和房间其他成员
 	if s.WsNotifier != nil {
-		notification := map[string]interface{}{
-			"type":        "member_added",
-			"room_id":     roomID,
-			"user_id":     userID,
-			"operator_id": operatorID,
-		}
-		notifBytes, _ := json.Marshal(notification)
-
-		// 获取所有房间成员
+		// 获取所有房间成员（包含新成员）
 		var members []uint64
-		s.DB.Model(&models.RoomUser{}).
+		_ = s.DB.Model(&models.RoomUser{}).
 			Where("room_id = ?", roomID).
-			Pluck("user_id", &members)
+			Pluck("user_id", &members).Error
 
-		for _, memberID := range members {
-			s.WsNotifier(memberID, notifBytes)
+		for _, addedID := range toAdd {
+			notification := map[string]interface{}{
+				"type":        "member_added",
+				"room_id":     roomID,
+				"user_id":     addedID,
+				"operator_id": operatorID,
+			}
+			notifBytes, _ := json.Marshal(notification)
+			for _, memberID := range members {
+				s.WsNotifier(memberID, notifBytes)
+			}
 		}
 	}
 
@@ -419,9 +632,16 @@ func (s *MemberService) AddRoomMember(roomID uint64, userID uint64, operatorID u
 
 // RemoveRoomMember 从房间移除成员
 func (s *MemberService) RemoveRoomMember(roomID uint64, userID uint64, operatorID uint64) error {
+	// 事务：移除成员 + 隐藏该成员会话
+	tx := s.DB.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	defer tx.Rollback()
+
 	// 检查操作者是否是管理员
 	var operator models.RoomUser
-	err := s.DB.Model(&models.RoomUser{}).
+	err := tx.Model(&models.RoomUser{}).
 		Where("room_id = ? AND user_id = ?", roomID, operatorID).
 		First(&operator).Error
 
@@ -434,10 +654,19 @@ func (s *MemberService) RemoveRoomMember(roomID uint64, userID uint64, operatorI
 	}
 
 	// 删除成员
-	err = s.DB.Where("room_id = ? AND user_id = ?", roomID, userID).
+	err = tx.Where("room_id = ? AND user_id = ?", roomID, userID).
 		Delete(&models.RoomUser{}).Error
 
 	if err != nil {
+		return err
+	}
+
+	// 隐藏该成员的会话（从消息列表不展示）
+	_ = tx.Model(&models.Conversation{}).
+		Where("user_id = ? AND room_id = ?", userID, roomID).
+		Updates(map[string]any{"is_visible": false, "updated_at": time.Now()}).Error
+
+	if err := tx.Commit().Error; err != nil {
 		return err
 	}
 

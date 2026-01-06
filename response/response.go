@@ -24,7 +24,12 @@ const (
 	CodePasswordError  = 10003 // 密码错误（登录失败）
 	CodeTokenInvalid   = 10004 // Token 无效/过期
 	CodePermissionDeny = 10005 // 权限不足
-	CodeInternalError  = 99999 // 内部错误
+
+	CodeVerifyCodeInvalid  = 10006 // 验证码错误/过期
+	CodeRedisNotConfigured = 10007 // 未配置 Redis
+	CodeUserAlreadyExists  = 10008 // 用户已存在（username/phone/email 冲突）
+
+	CodeInternalError = 99999 // 内部错误
 )
 
 // Success 成功响应

@@ -67,11 +67,11 @@ func (s *RoomService) createRoom(roomType uint8, name string, creator uint64, me
 	if err := tx.Create(room).Error; err != nil {
 		return nil, err
 	}
-
+	members = append(members, creator)
 	// 添加房间成员
 	for _, uid := range members {
 		member := &models.RoomUser{
-			RoomID:    room.ID, // 注意：这里使用的是数字 ID，不是 RoomID 字符串
+			RoomID:    room.ID,
 			UserID:    uid,
 			Role:      0, // 普通成员
 			JoinTime:  time.Now(),
@@ -100,7 +100,7 @@ func (s *RoomService) GetRoomByAccount(account string) (*models.Room, error) {
 	return &room, err
 }
 
-// GetRoomByAccount 根据对外房间号/群号查询房间
+// GetRoomByID 根据对外房间号/群号查询房间
 func (s *RoomService) GetRoomByID(account uint64) (*models.Room, error) {
 	var room models.Room
 	err := s.DB.First(&room, account).Error
@@ -116,15 +116,217 @@ func (s *RoomService) GetRoomMembers(roomID uint64) ([]uint64, error) {
 	return members, err
 }
 
+// RoomDTO 房间列表返回结构
+type RoomDTO struct {
+	ID          uint64      `json:"id"`
+	RoomAccount string      `json:"room_account"`
+	Name        string      `json:"name"`
+	Avatar      string      `json:"avatar"`
+	Type        uint8       `json:"type"`
+	LastMessage *MessageDTO `json:"last_message,omitempty"`
+	UnreadCount int         `json:"unread_count"`
+	UpdatedAt   time.Time   `json:"updated_at"`
+}
+
+// GroupInfoDTO 群基础信息（不含成员列表）
+type GroupInfoDTO struct {
+	ID          uint64    `json:"id"`
+	RoomAccount string    `json:"room_account"`
+	Name        string    `json:"name"`
+	Avatar      string    `json:"avatar"`
+	CreatorID   uint64    `json:"creator_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// GetGroupInfo 获取群基础信息
+func (s *RoomService) GetGroupInfo(roomID uint64) (*GroupInfoDTO, error) {
+	var room models.Room
+	if err := s.DB.Model(&models.Room{}).
+		Select("id, room_account, name, avatar, creator_id, created_at, updated_at, type").
+		Where("id = ?", roomID).
+		First(&room).Error; err != nil {
+		return nil, err
+	}
+	if room.Type != 2 {
+		return nil, fmt.Errorf("not a group room")
+	}
+	return &GroupInfoDTO{
+		ID:          room.ID,
+		RoomAccount: room.RoomAccount,
+		Name:        room.Name,
+		Avatar:      room.Avatar,
+		CreatorID:   room.CreatorID,
+		CreatedAt:   room.CreatedAt,
+		UpdatedAt:   room.UpdatedAt,
+	}, nil
+}
+
 // GetUserRooms 获取用户参与的所有房间
-func (s *RoomService) GetUserRooms(userID uint) ([]models.Room, error) {
+func (s *RoomService) GetUserRooms(userID uint) ([]RoomDTO, error) {
 	var rooms []models.Room
+	roomTable := models.Room{}.TableName()
+	roomUserTable := models.RoomUser{}.TableName()
+
+	// 1. 查询用户所在的房间
 	err := s.DB.Model(&models.Room{}).
-		Joins("JOIN room_users ON rooms.id = room_users.room_id").
-		Where("room_users.user_id = ?", userID).
+		Joins(fmt.Sprintf("JOIN %s ON %s.id = %s.room_id", roomUserTable, roomTable, roomUserTable)).
+		Where(fmt.Sprintf("%s.user_id = ?", roomUserTable), userID).
 		Find(&rooms).Error
 
-	return rooms, err
+	if err != nil {
+		return nil, err
+	}
+
+	if len(rooms) == 0 {
+		return []RoomDTO{}, nil
+	}
+
+	roomIDs := make([]uint64, len(rooms))
+	for i, r := range rooms {
+		roomIDs[i] = r.ID
+	}
+
+	// 2. 批量查询每个房间的最新一条消息
+	// 使用子查询找到每个房间最大的消息ID
+	// SELECT * FROM messages WHERE id IN (SELECT MAX(id) FROM messages WHERE room_id IN (?) GROUP BY room_id)
+	var lastMessages []models.Message
+	err = s.DB.Where("id IN (?)",
+		s.DB.Model(&models.Message{}).Select("MAX(id)").Where("room_id IN ?", roomIDs).Group("room_id"),
+	).Find(&lastMessages).Error
+
+	if err != nil {
+		// 记录错误但不中断，可能只是没消息
+		log.Printf("GetUserRooms fetch last messages error: %v", err)
+	}
+
+	lastMsgMap := make(map[uint64]*models.Message)
+	for i := range lastMessages {
+		lastMsgMap[lastMessages[i].RoomID] = &lastMessages[i]
+	}
+
+	// 3. 批量查询私聊对象的头像和昵称
+	// 对于私聊房间 (Type=1)，我们需要找到另一个成员的信息
+	privateRoomIDs := make([]uint64, 0)
+	for _, r := range rooms {
+		if r.Type == 1 {
+			privateRoomIDs = append(privateRoomIDs, r.ID)
+		}
+	}
+
+	otherUserMap := make(map[uint64]models.User) // roomID -> User
+	if len(privateRoomIDs) > 0 {
+		var roomUsers []models.RoomUser
+		// 查找这些房间里，user_id != 当前userID 的记录
+		err = s.DB.Preload("User").
+			Where("room_id IN ? AND user_id != ?", privateRoomIDs, userID).
+			Find(&roomUsers).Error
+		if err == nil {
+			for _, ru := range roomUsers {
+				otherUserMap[ru.RoomID] = ru.User
+			}
+		}
+	}
+
+	// 4. 组装 DTO
+	dtos := make([]RoomDTO, len(rooms))
+	for i, r := range rooms {
+		dto := RoomDTO{
+			ID:          r.ID,
+			RoomAccount: r.RoomAccount,
+			Type:        r.Type,
+			UpdatedAt:   r.UpdatedAt,
+		}
+
+		// 处理头像和名称
+		if r.Type == 1 {
+			// 私聊：使用对方的头像和昵称
+			if otherUser, ok := otherUserMap[r.ID]; ok {
+				dto.Name = otherUser.Nickname
+				dto.Avatar = otherUser.Avatar
+			} else {
+				// 兜底，可能对方退出了或者数据异常
+				dto.Name = "未知用户"
+				dto.Avatar = "" // 默认头像
+			}
+		} else {
+			// 群聊：使用群名称和群头像
+			dto.Name = r.Name
+			dto.Avatar = r.Avatar
+			if dto.Name == "" {
+				dto.Name = "群聊" // 默认群名
+			}
+		}
+
+		// 处理最新消息
+		if msg, ok := lastMsgMap[r.ID]; ok {
+			dto.LastMessage = ToMessageDTO(msg)
+		}
+
+		dtos[i] = dto
+	}
+
+	return dtos, nil
+}
+
+// GetGroupList 获取用户参与的群聊列表（Type=2）
+func (s *RoomService) GetGroupList(userID uint) ([]RoomDTO, error) {
+	var rooms []models.Room
+	roomTable := models.Room{}.TableName()
+	roomUserTable := models.RoomUser{}.TableName()
+
+	// 1. 查询用户所在的群聊房间
+	err := s.DB.Model(&models.Room{}).
+		Joins(fmt.Sprintf("JOIN %s ON %s.id = %s.room_id", roomUserTable, roomTable, roomUserTable)).
+		Where(fmt.Sprintf("%s.user_id = ? AND %s.type = ?", roomUserTable, roomTable), userID, 2).
+		Find(&rooms).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(rooms) == 0 {
+		return []RoomDTO{}, nil
+	}
+
+	roomIDs := make([]uint64, len(rooms))
+	for i, r := range rooms {
+		roomIDs[i] = r.ID
+	}
+
+	// 2. 批量查询每个房间的最新一条消息
+	var lastMessages []models.Message
+	err = s.DB.Where("id IN (?)",
+		s.DB.Model(&models.Message{}).Select("MAX(id)").Where("room_id IN ?", roomIDs).Group("room_id"),
+	).Find(&lastMessages).Error
+	if err != nil {
+		log.Printf("GetGroupList fetch last messages error: %v", err)
+	}
+
+	lastMsgMap := make(map[uint64]*models.Message)
+	for i := range lastMessages {
+		lastMsgMap[lastMessages[i].RoomID] = &lastMessages[i]
+	}
+
+	// 3. 组装 DTO
+	dtos := make([]RoomDTO, len(rooms))
+	for i, r := range rooms {
+		dto := RoomDTO{
+			ID:          r.ID,
+			RoomAccount: r.RoomAccount,
+			Name:        r.Name,
+			Avatar:      r.Avatar,
+			Type:        r.Type,
+			UpdatedAt:   r.UpdatedAt,
+		}
+		if dto.Name == "" {
+			dto.Name = "群聊"
+		}
+		if msg, ok := lastMsgMap[r.ID]; ok {
+			dto.LastMessage = ToMessageDTO(msg)
+		}
+		dtos[i] = dto
+	}
+
+	return dtos, nil
 }
 
 // CheckRoomMember 检查用户是否是房间成员
@@ -142,4 +344,238 @@ func generatePrivateRoomAccount(userID1, userID2 uint64) string {
 		userID1, userID2 = userID2, userID1
 	}
 	return fmt.Sprintf("private_%d_%d", userID1, userID2)
+}
+
+// UpdateGroupInfo 更新群聊信息（名称、头像）
+func (s *RoomService) UpdateGroupInfo(operatorID, roomID uint64, name, avatar string) error {
+	// Check permission: Admin or Owner
+	role, err := s.getMemberRole(roomID, operatorID)
+	if err != nil {
+		return err
+	}
+	if role < 1 { // 0 is member
+		return errors.New("permission denied")
+	}
+
+	updates := map[string]interface{}{}
+	if name != "" {
+		updates["name"] = name
+	}
+	if avatar != "" {
+		updates["avatar"] = avatar
+	}
+
+	return s.DB.Model(&models.Room{}).Where("id = ?", roomID).Updates(updates).Error
+}
+
+// SetGroupAdmin 设置/取消管理员
+func (s *RoomService) SetGroupAdmin(operatorID, roomID, targetUserID uint64, isAdmin bool) error {
+	// Check permission: Owner only
+	role, err := s.getMemberRole(roomID, operatorID)
+	if err != nil {
+		return err
+	}
+	if role != 2 { // Only owner
+		return errors.New("permission denied: only owner can set admin")
+	}
+
+	newRole := 0
+	if isAdmin {
+		newRole = 1
+	}
+
+	return s.DB.Model(&models.RoomUser{}).
+		Where("room_id = ? AND user_id = ?", roomID, targetUserID).
+		Update("role", newRole).Error
+}
+
+// SetGroupMuteCountdown 设置群禁言（倒计时）
+// durationMinutes: 0 means cancel mute
+func (s *RoomService) SetGroupMuteCountdown(operatorID, roomID uint64, durationMinutes int) error {
+	role, err := s.getMemberRole(roomID, operatorID)
+	if err != nil {
+		return err
+	}
+	if role < 1 {
+		return errors.New("permission denied")
+	}
+
+	updates := map[string]interface{}{
+		"is_mute":    false,
+		"mute_until": nil,
+	}
+
+	if durationMinutes > 0 {
+		t := time.Now().Add(time.Duration(durationMinutes) * time.Minute)
+		updates["is_mute"] = true
+		updates["mute_until"] = &t
+	}
+
+	return s.DB.Model(&models.Room{}).Where("id = ?", roomID).Updates(updates).Error
+}
+
+// SetGroupMuteScheduled 设置群禁言（定时）
+// startTime: "HH:MM", durationMinutes: duration
+func (s *RoomService) SetGroupMuteScheduled(operatorID, roomID uint64, startTime string, durationMinutes int) error {
+	role, err := s.getMemberRole(roomID, operatorID)
+	if err != nil {
+		return err
+	}
+	if role < 1 {
+		return errors.New("permission denied")
+	}
+
+	updates := map[string]interface{}{
+		"mute_daily_start_time": startTime,
+		"mute_daily_duration":   durationMinutes,
+	}
+
+	return s.DB.Model(&models.Room{}).Where("id = ?", roomID).Updates(updates).Error
+}
+
+// SetUserMute 设置指定用户禁言
+func (s *RoomService) SetUserMute(operatorID, roomID, targetUserID uint64, durationMinutes int) error {
+	operatorRole, err := s.getMemberRole(roomID, operatorID)
+	if err != nil {
+		return err
+	}
+	if operatorRole < 1 {
+		return errors.New("permission denied")
+	}
+
+	// Check target role (optional: admin cannot mute owner, etc. but for now simple check)
+	// Usually admin cannot mute other admins or owner.
+	targetRole, err := s.getMemberRole(roomID, targetUserID)
+	if err == nil && targetRole >= operatorRole {
+		return errors.New("permission denied: cannot mute user with equal or higher role")
+	}
+
+	updates := map[string]interface{}{
+		"is_muted":    false,
+		"muted_until": nil,
+	}
+
+	if durationMinutes > 0 {
+		t := time.Now().Add(time.Duration(durationMinutes) * time.Minute)
+		updates["is_muted"] = true
+		updates["muted_until"] = &t
+	}
+
+	return s.DB.Model(&models.RoomUser{}).
+		Where("room_id = ? AND user_id = ?", roomID, targetUserID).
+		Updates(updates).Error
+}
+
+// -------------------- 群成员列表（Member List） --------------------
+
+// -------------------- 群昵称（我在群里的昵称） --------------------
+
+// SetMyGroupNickname 设置当前用户在指定群聊里的昵称（room_user.nickname）
+// nickname 允许为空：为空表示清空群昵称，显示端会回退到备注/用户昵称/用户名。
+func (s *RoomService) SetMyGroupNickname(userID, roomID uint64, nickname string) error {
+	// 必须是成员
+	var count int64
+	if err := s.DB.Model(&models.RoomUser{}).
+		Where("room_id = ? AND user_id = ?", roomID, userID).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return fmt.Errorf("not a room member")
+	}
+
+	return s.DB.Model(&models.RoomUser{}).
+		Where("room_id = ? AND user_id = ?", roomID, userID).
+		Updates(map[string]any{"nickname": nickname, "updated_at": time.Now()}).Error
+}
+
+// RoomMemberListItemDTO 群成员列表项
+// display_name 按优先级：好友备注 > 群昵称 > 用户昵称 > 用户名
+type RoomMemberListItemDTO struct {
+	UserID      uint64 `json:"user_id"`
+	Username    string `json:"username"`
+	Nickname    string `json:"nickname"`
+	Remark      string `json:"remark"`         // 好友备注（当前用户视角）
+	GroupNick   string `json:"group_nickname"` // 群昵称（room_user.nickname）
+	DisplayName string `json:"display_name"`
+	Avatar      string `json:"avatar"`
+	Role        uint8  `json:"role"`
+	IsMuted     bool   `json:"is_muted"`
+}
+
+// GetRoomMemberList 获取房间成员列表（展示名按：备注 > 群昵称 > 昵称 > 用户名）
+func (s *RoomService) GetRoomMemberList(roomID uint64, viewerUserID uint64) ([]RoomMemberListItemDTO, error) {
+	// 1) 拉出 room_user + user
+	var roomUsers []models.RoomUser
+	err := s.DB.Preload("User").
+		Where("room_id = ?", roomID).
+		Find(&roomUsers).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(roomUsers) == 0 {
+		return []RoomMemberListItemDTO{}, nil
+	}
+
+	memberIDs := make([]uint64, 0, len(roomUsers))
+	for _, ru := range roomUsers {
+		memberIDs = append(memberIDs, ru.UserID)
+	}
+
+	// 2) 取 viewer -> member 的好友备注 (friend.remark)
+	remarkMap := make(map[uint64]string)
+	{
+		var friends []models.Friend
+		_ = s.DB.Model(&models.Friend{}).
+			Select("friend_id, remark").
+			Where("user_id = ? AND friend_id IN ? AND status = ?", viewerUserID, memberIDs, 1).
+			Find(&friends).Error
+		for _, f := range friends {
+			if f.Remark != "" {
+				remarkMap[f.FriendID] = f.Remark
+			}
+		}
+	}
+
+	// 3) 组装 DTO
+	out := make([]RoomMemberListItemDTO, 0, len(roomUsers))
+	for _, ru := range roomUsers {
+		u := ru.User
+		item := RoomMemberListItemDTO{
+			UserID:    ru.UserID,
+			Username:  u.Username,
+			Nickname:  u.Nickname,
+			Remark:    remarkMap[ru.UserID],
+			GroupNick: ru.Nickname,
+			Avatar:    u.Avatar,
+			Role:      ru.Role,
+			IsMuted:   ru.IsMuted,
+		}
+
+		// display_name 优先级：备注 > 群昵称 > 用户昵称 > 用户名
+		switch {
+		case item.Remark != "":
+			item.DisplayName = item.Remark
+		case item.GroupNick != "":
+			item.DisplayName = item.GroupNick
+		case item.Nickname != "":
+			item.DisplayName = item.Nickname
+		default:
+			item.DisplayName = item.Username
+		}
+
+		out = append(out, item)
+	}
+
+	return out, nil
+}
+
+// Helper
+func (s *RoomService) getMemberRole(roomID, userID uint64) (int, error) {
+	var member models.RoomUser
+	err := s.DB.Select("role").Where("room_id = ? AND user_id = ?", roomID, userID).First(&member).Error
+	if err != nil {
+		return 0, err
+	}
+	return int(member.Role), nil
 }

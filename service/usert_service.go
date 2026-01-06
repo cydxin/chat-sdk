@@ -16,53 +16,59 @@ import (
 
 type UserService struct {
 	*Service
-	userDao       *models.UserDAO
-	tokenService  *TokenService
-	loginTokenTTL time.Duration
+	userDao           *models.UserDAO
+	tokenService      *TokenService
+	verifyCodeService *VerifyCodeService
+	loginTokenTTL     time.Duration
 }
 
 func NewUserService(s *Service) *UserService {
 	log.Println("NewUserService")
 	return &UserService{
-		Service:       s,
-		userDao:       models.NewUserDAO(s.DB),
-		tokenService:  NewTokenService(s.RDB),
-		loginTokenTTL: 7 * 24 * time.Hour,
+		Service:           s,
+		userDao:           models.NewUserDAO(s.DB),
+		tokenService:      NewTokenService(s.RDB),
+		verifyCodeService: NewVerifyCodeService(s.RDB),
+		loginTokenTTL:     7 * 24 * time.Hour,
 	}
 }
 
 // --- types ---
 
 type UserDTO struct {
-	ID           uint64     `json:"id"`
-	UID          string     `json:"uid"`
-	Username     string     `json:"username"`
-	Nickname     string     `json:"nickname"`
-	Avatar       string     `json:"avatar"`
-	Phone        string     `json:"phone"`
-	Email        string     `json:"email"`
-	Gender       uint8      `json:"gender"`
-	Birthday     *time.Time `json:"birthday"`
-	Signature    string     `json:"signature"`
-	OnlineStatus uint8      `json:"online_status"`
-	LastLoginAt  *time.Time `json:"last_login_at"`
-	LastActiveAt *time.Time `json:"last_active_at"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID            uint64     `json:"id"`
+	UID           string     `json:"uid"`
+	Username      string     `json:"username"`
+	Nickname      string     `json:"nickname"`
+	Remark        string     `json:"remark"`         // 好友备注（仅在好友/私聊场景有意义）
+	GroupNickname string     `json:"group_nickname"` // 我在该群里的昵称（群成员/会话列表可用）
+	Avatar        string     `json:"avatar"`
+	Phone         string     `json:"phone"`
+	Email         string     `json:"email"`
+	Gender        uint8      `json:"gender"`
+	Birthday      *time.Time `json:"birthday"`
+	Signature     string     `json:"signature"`
+	OnlineStatus  uint8      `json:"online_status"`
+	LastLoginAt   *time.Time `json:"last_login_at"`
+	LastActiveAt  *time.Time `json:"last_active_at"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	RoomID        uint64     `json:"room_id"`      // 私聊房间ID（与该好友的会话）
+	RoomAccount   string     `json:"room_account"` // 私聊房间对外号（与该好友的会话）
 }
 
 type RegisterReq struct {
 	Username string `json:"username"`
+	Phone    string `json:"phone"` // phone/email 二选一
+	Email    string `json:"email"` // phone/email 二选一
 	Password string `json:"password"`
-	//Nickname string `json:"nickname"`
-	//Avatar   string `json:"avatar"`
-	//Phone    string `json:"phone"`
-	//Email    string `json:"email"`
+	Code     string `json:"code"`
 }
 
 type LoginReq struct {
-	Account  string `json:"account"`  // username/phone/email
-	Password string `json:"password"` // plaintext
+	Account  string `json:"account"`            // username/phone/email
+	Password string `json:"password,omitempty"` // plaintext（可选：与 code 二选一）
+	Code     string `json:"code,omitempty"`     // 验证码（可选：与 password 二选一）
 }
 
 type UpdateUserReq struct {
@@ -87,6 +93,12 @@ type SearchUsersReq struct {
 type LoginResp struct {
 	Token string  `json:"token"`
 	User  UserDTO `json:"user"`
+}
+
+type ForgotPasswordReq struct {
+	Identifier  string `json:"identifier"` // phone/email/username(这里允许 username，但更推荐 phone/email)
+	NewPassword string `json:"new_password"`
+	Code        string `json:"code"`
 }
 
 // --- 现 ---
@@ -118,25 +130,68 @@ func normalizeAccount(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// Register 注册（成功不返回用户数据）
-func (s *UserService) Register(req RegisterReq) error {
+func normalizeEmail(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.Contains(s, "@") {
+		s = strings.ToLower(s)
+	}
+	return s
+}
+
+func pickIdentifier(phone, email string) (string, error) {
+	phone = strings.TrimSpace(phone)
+	email = normalizeEmail(email)
+	if phone == "" && email == "" {
+		return "", fmt.Errorf("phone or email is required")
+	}
+	if phone != "" && email != "" {
+		return "", fmt.Errorf("phone and email cannot both be provided")
+	}
+	if phone != "" {
+		return phone, nil
+	}
+	return email, nil
+}
+
+// Register 注册（验证码校验 + 写库）
+func (s *UserService) Register(ctx context.Context, req RegisterReq) error {
 	username := strings.TrimSpace(req.Username)
 	if username == "" {
 		return fmt.Errorf("username is required")
 	}
-	if strings.TrimSpace(req.Password) == "" {
+	password := strings.TrimSpace(req.Password)
+	if password == "" {
 		return fmt.Errorf("password is required")
 	}
+	identifier, err := pickIdentifier(req.Phone, req.Email)
+	if err != nil {
+		return err
+	}
+	code := strings.TrimSpace(req.Code)
+	if code == "" {
+		return fmt.Errorf("code is required")
+	}
+	if s.RDB == nil {
+		return fmt.Errorf("redis is not configured")
+	}
 
-	exists, err := s.userDao.ExistsByUsername(username)
+	ok, err := s.verifyCodeService.VerifyCode(ctx, VerifyCodePurposeRegister, identifier, code)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("invalid verification code")
+	}
+
+	exists, err := s.userDao.ExistsByAccount(username, req.Phone, req.Email)
 	if err != nil {
 		return err
 	}
 	if exists {
-		return fmt.Errorf("username already exists")
+		return fmt.Errorf("user already exists")
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
@@ -146,6 +201,8 @@ func (s *UserService) Register(req RegisterReq) error {
 		UID:       uuid.New().String(),
 		Username:  username,
 		Password:  string(hash),
+		Phone:     strings.TrimSpace(req.Phone),
+		Email:     normalizeEmail(req.Email),
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -157,6 +214,11 @@ func (s *UserService) Register(req RegisterReq) error {
 		return err
 	}
 	return nil
+}
+
+// Register 兼容旧调用：不带 ctx 时使用 Background。
+func (s *UserService) RegisterLegacy(req RegisterReq) error {
+	return s.Register(context.Background(), req)
 }
 
 // Login 登录（兼容旧接口：只返回用户信息，不返回 token）
@@ -174,21 +236,16 @@ func (s *UserService) LoginWithToken(ctx context.Context, req LoginReq) (*LoginR
 	if acc == "" {
 		return nil, fmt.Errorf("account is required")
 	}
-	if strings.TrimSpace(req.Password) == "" {
-		return nil, fmt.Errorf("password is required")
+	password := strings.TrimSpace(req.Password)
+	code := strings.TrimSpace(req.Code)
+	if password == "" && code == "" {
+		return nil, fmt.Errorf("password or code is required")
+	}
+	if password != "" && code != "" {
+		return nil, fmt.Errorf("password and code cannot both be provided")
 	}
 
-	var u *models.User
-	var err error
-
-	if strings.Contains(acc, "@") {
-		u, err = s.userDao.FindByEmail(acc)
-	} else {
-		u, err = s.userDao.FindByUsername(acc)
-		if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
-			u, err = s.userDao.FindByPhone(acc)
-		}
-	}
+	u, err := s.userDao.FindByAccount(acc)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("invalid account or password")
@@ -196,8 +253,23 @@ func (s *UserService) LoginWithToken(ctx context.Context, req LoginReq) (*LoginR
 		return nil, err
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(req.Password)); err != nil {
-		return nil, fmt.Errorf("invalid account or password")
+	// 1) 密码登录
+	if password != "" {
+		if err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password)); err != nil {
+			return nil, fmt.Errorf("invalid account or password")
+		}
+	} else {
+		// 2) 验证码登录
+		if s.RDB == nil {
+			return nil, fmt.Errorf("redis is not configured")
+		}
+		ok, err := s.verifyCodeService.VerifyCode(ctx, VerifyCodePurposeLogin, acc, code)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("invalid verification code")
+		}
 	}
 
 	now := time.Now()
@@ -214,13 +286,11 @@ func (s *UserService) LoginWithToken(ctx context.Context, req LoginReq) (*LoginR
 
 	resp := &LoginResp{User: *toUserDTO(fresh)}
 
-	// 没有配置 Redis 时：返回用户信息但不发 token（调用层可自行决定是否允许）
 	if s.RDB == nil {
 		resp.Token = ""
 		return resp, nil
 	}
 
-	// 生成并存储 token
 	token, err := s.tokenService.GenerateToken()
 	if err != nil {
 		return nil, err
@@ -230,6 +300,40 @@ func (s *UserService) LoginWithToken(ctx context.Context, req LoginReq) (*LoginR
 	}
 	resp.Token = token
 	return resp, nil
+}
+
+// ForgotPassword 忘记密码（验证码校验后更新密码）
+func (s *UserService) ForgotPassword(ctx context.Context, req ForgotPasswordReq) error {
+	identifier := normalizeAccount(req.Identifier)
+	if identifier == "" {
+		return fmt.Errorf("identifier is required")
+	}
+	newPwd := strings.TrimSpace(req.NewPassword)
+	if newPwd == "" {
+		return fmt.Errorf("new_password is required")
+	}
+	code := strings.TrimSpace(req.Code)
+	if code == "" {
+		return fmt.Errorf("code is required")
+	}
+	if s.RDB == nil {
+		return fmt.Errorf("redis is not configured")
+	}
+
+	u, err := s.userDao.FindByAccount(identifier)
+	if err != nil {
+		return err
+	}
+
+	ok, err := s.verifyCodeService.VerifyCode(ctx, VerifyCodePurposeForgotPassword, identifier, code)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("invalid verification code")
+	}
+
+	return s.UpdatePassword(u.ID, newPwd)
 }
 
 // GetUser 获取用户信息（脱敏）

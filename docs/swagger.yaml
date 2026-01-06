@@ -1,5 +1,194 @@
 basePath: /api/v1
 definitions:
+  chat_sdk.CommentMomentReq:
+    properties:
+      content:
+        type: string
+      moment_id:
+        type: integer
+      parent_id:
+        type: integer
+    required:
+    - content
+    - moment_id
+    type: object
+  chat_sdk.CreateGroupRoomReq:
+    properties:
+      members:
+        items:
+          type: integer
+        type: array
+      name:
+        type: string
+    required:
+    - members
+    - name
+    type: object
+  chat_sdk.ForwardMessageReq:
+    properties:
+      comment:
+        type: string
+      items:
+        items:
+          properties:
+            message_id:
+              type: integer
+          type: object
+        type: array
+      mode:
+        description: merge/single
+        example: merge
+        type: string
+      to_room_ids:
+        items:
+          type: integer
+        type: array
+    required:
+    - items
+    - to_room_ids
+    type: object
+  chat_sdk.RoomMemberReq:
+    properties:
+      room_id:
+        example: 1
+        type: integer
+      user_id:
+        description: remove 用
+        example: 1001
+        type: integer
+      user_ids:
+        description: add 用（批量）
+        example:
+        - 1001
+        items:
+          type: integer
+        type: array
+    required:
+    - room_id
+    type: object
+  chat_sdk.SendFriendRequestReq:
+    properties:
+      message:
+        example: 你好，交个朋友
+        type: string
+      to_user:
+        example: 1001
+        type: integer
+    required:
+    - to_user
+    type: object
+  chat_sdk.SendVerifyCodeReq:
+    properties:
+      identifier:
+        description: 手机号或邮箱
+        example: "13800138000"
+        type: string
+      purpose:
+        description: register/forgot_password
+        example: register
+        type: string
+    required:
+    - identifier
+    - purpose
+    type: object
+  chat_sdk.SetFriendRemarkReq:
+    properties:
+      friend_id:
+        example: 1002
+        type: integer
+      remark:
+        example: 老板
+        type: string
+    required:
+    - friend_id
+    type: object
+  chat_sdk.SetGroupAdminReq:
+    properties:
+      is_admin:
+        type: boolean
+      room_id:
+        type: integer
+      target_user_id:
+        type: integer
+    required:
+    - room_id
+    - target_user_id
+    type: object
+  chat_sdk.SetGroupMuteReq:
+    properties:
+      duration_minutes:
+        description: 0 to cancel
+        type: integer
+      room_id:
+        type: integer
+    required:
+    - room_id
+    type: object
+  chat_sdk.SetGroupMuteScheduledReq:
+    properties:
+      duration_minutes:
+        type: integer
+      room_id:
+        type: integer
+      start_time:
+        description: HH:MM
+        type: string
+    required:
+    - duration_minutes
+    - room_id
+    - start_time
+    type: object
+  chat_sdk.SetMyGroupNicknameReq:
+    properties:
+      nickname:
+        example: 我在群里的昵称
+        type: string
+      room_id:
+        example: 1
+        type: integer
+    required:
+    - room_id
+    type: object
+  chat_sdk.SetUserMuteReq:
+    properties:
+      duration_minutes:
+        description: 0 to cancel
+        type: integer
+      room_id:
+        type: integer
+      target_user_id:
+        type: integer
+    required:
+    - room_id
+    - target_user_id
+    type: object
+  chat_sdk.UpdateGroupInfoReq:
+    properties:
+      avatar:
+        type: string
+      name:
+        type: string
+      room_id:
+        type: integer
+    required:
+    - room_id
+    type: object
+  chat_sdk.UpdateUserAvatarReq:
+    properties:
+      avatar:
+        example: https://example.com/avatar.jpg
+        type: string
+    required:
+    - avatar
+    type: object
+  chat_sdk.UpdateUserPasswordReq:
+    properties:
+      new_password:
+        example: "123456"
+        type: string
+    required:
+    - new_password
+    type: object
   gorm.DeletedAt:
     properties:
       time:
@@ -156,6 +345,9 @@ definitions:
       isEncrypted:
         description: 是否端到端加密
         type: boolean
+      isMute:
+        description: 新增禁言相关字段
+        type: boolean
       memberLimit:
         description: 成员上限
         type: integer
@@ -163,6 +355,15 @@ definitions:
         items:
           $ref: '#/definitions/models.Message'
         type: array
+      muteDailyDuration:
+        description: 每日禁言持续时长（分钟）
+        type: integer
+      muteDailyStartTime:
+        description: 每日禁言开始时间 "HH:MM"
+        type: string
+      muteUntil:
+        description: 全员禁言截止时间（倒计时模式）
+        type: string
       name:
         description: 房间名称
         type: string
@@ -316,6 +517,34 @@ definitions:
       user_id:
         type: integer
     type: object
+  service.ConversationListItemDTO:
+    properties:
+      avatar:
+        description: 私聊：对方头像；群聊：群头像
+        type: string
+      conversation_id:
+        type: integer
+      last_message:
+        $ref: '#/definitions/service.MessageDTO'
+      name:
+        description: 私聊：对方昵称；群聊：群名
+        type: string
+      room_account:
+        type: string
+      room_id:
+        type: integer
+      room_type:
+        description: 1-私聊 2-群聊
+        type: integer
+      unread_count:
+        type: integer
+      updated_at:
+        description: unix seconds for easy sort/render
+        type: integer
+      user_id:
+        description: 私聊时为对方用户ID，群聊时为0
+        type: integer
+    type: object
   service.CreateMomentReq:
     properties:
       images:
@@ -329,13 +558,56 @@ definitions:
         description: 单个视频URL
         type: string
     type: object
+  service.ForgotPasswordReq:
+    properties:
+      code:
+        type: string
+      identifier:
+        description: phone/email/username(这里允许 username，但更推荐 phone/email)
+        type: string
+      new_password:
+        type: string
+    type: object
+  service.FriendApplyDTO:
+    properties:
+      created_at:
+        type: string
+      from_user:
+        $ref: '#/definitions/service.UserBasicDTO'
+      id:
+        type: integer
+      reason:
+        type: string
+      status:
+        type: integer
+    type: object
+  service.GroupInfoDTO:
+    properties:
+      avatar:
+        type: string
+      created_at:
+        type: string
+      creator_id:
+        type: integer
+      id:
+        type: integer
+      name:
+        type: string
+      room_account:
+        type: string
+      updated_at:
+        type: string
+    type: object
   service.LoginReq:
     properties:
       account:
         description: username/phone/email
         type: string
+      code:
+        description: 验证码（可选：与 password 二选一）
+        type: string
       password:
-        description: plaintext
+        description: plaintext（可选：与 code 二选一）
         type: string
     type: object
   service.LoginResp:
@@ -367,6 +639,37 @@ definitions:
         type: integer
       room_id:
         type: integer
+      sender_id:
+        type: integer
+      status:
+        type: integer
+      type:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  service.MessageListItemDTO:
+    properties:
+      content:
+        type: string
+      created_at:
+        type: string
+      extra:
+        items:
+          type: integer
+        type: array
+      id:
+        type: integer
+      is_encrypted:
+        type: boolean
+      is_system:
+        type: boolean
+      reply_to_msg_id:
+        type: integer
+      room_id:
+        type: integer
+      sender:
+        $ref: '#/definitions/service.SenderDTO'
       sender_id:
         type: integer
       status:
@@ -409,7 +712,102 @@ definitions:
     type: object
   service.RegisterReq:
     properties:
+      code:
+        type: string
+      email:
+        description: phone/email 二选一
+        type: string
       password:
+        type: string
+      phone:
+        description: phone/email 二选一
+        type: string
+      username:
+        type: string
+    type: object
+  service.RoomDTO:
+    properties:
+      avatar:
+        type: string
+      id:
+        type: integer
+      last_message:
+        $ref: '#/definitions/service.MessageDTO'
+      name:
+        type: string
+      room_account:
+        type: string
+      type:
+        type: integer
+      unread_count:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  service.RoomMemberListItemDTO:
+    properties:
+      avatar:
+        type: string
+      display_name:
+        type: string
+      group_nickname:
+        description: 群昵称（room_user.nickname）
+        type: string
+      is_muted:
+        type: boolean
+      nickname:
+        type: string
+      remark:
+        description: 好友备注（当前用户视角）
+        type: string
+      role:
+        type: integer
+      user_id:
+        type: integer
+      username:
+        type: string
+    type: object
+  service.SendCodeResult:
+    properties:
+      code:
+        description: 是否返回由上层/调用方决定；这里总是返回，便于集成发送通道与测试
+        type: string
+      ttl_seconds:
+        type: integer
+    type: object
+  service.SenderDTO:
+    properties:
+      avatar:
+        type: string
+      id:
+        type: integer
+      nickname:
+        type: string
+      username:
+        type: string
+    type: object
+  service.UpdateUserReq:
+    properties:
+      birthday:
+        type: string
+      email:
+        type: string
+      gender:
+        type: integer
+      nickname:
+        type: string
+      phone:
+        type: string
+      signature:
+        type: string
+    type: object
+  service.UserBasicDTO:
+    properties:
+      avatar:
+        type: string
+      id:
+        type: integer
+      nickname:
         type: string
       username:
         type: string
@@ -426,6 +824,9 @@ definitions:
         type: string
       gender:
         type: integer
+      group_nickname:
+        description: 我在该群里的昵称（群成员/会话列表可用）
+        type: string
       id:
         type: integer
       last_active_at:
@@ -438,6 +839,15 @@ definitions:
         type: integer
       phone:
         type: string
+      remark:
+        description: 好友备注（仅在好友/私聊场景有意义）
+        type: string
+      room_account:
+        description: 私聊房间对外号（与该好友的会话）
+        type: string
+      room_id:
+        description: 私聊房间ID（与该好友的会话）
+        type: integer
       signature:
         type: string
       uid:
@@ -608,7 +1018,7 @@ paths:
             - properties:
                 data:
                   items:
-                    $ref: '#/definitions/models.Friend'
+                    $ref: '#/definitions/service.UserDTO'
                   type: array
               type: object
         "400":
@@ -628,7 +1038,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取当前用户待处理的好友申请列表
+      description: 获取当前用户的好友申请列表
       produces:
       - application/json
       responses:
@@ -640,7 +1050,7 @@ paths:
             - properties:
                 data:
                   items:
-                    $ref: '#/definitions/models.FriendApply'
+                    $ref: '#/definitions/service.FriendApplyDTO'
                   type: array
               type: object
         "400":
@@ -653,7 +1063,7 @@ paths:
             $ref: '#/definitions/response.Response'
       security:
       - BearerAuth: []
-      summary: 获取待处理好友申请
+      summary: 获取好友申请
       tags:
       - 好友
   /friend/reject:
@@ -688,18 +1098,50 @@ paths:
       summary: 拒绝好友申请
       tags:
       - 好友
+  /friend/remark:
+    post:
+      consumes:
+      - application/json
+      description: 设置当前用户对某个好友的备注（仅影响自己视角）
+      parameters:
+      - description: 请求参数
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/chat_sdk.SetFriendRemarkReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 设置好友备注
+      tags:
+      - 好友
   /friend/request:
     post:
       consumes:
       - application/json
       description: 向目标用户发送好友申请
       parameters:
-      - description: 好友申请（to_user, message）
+      - description: 好友申请
         in: body
         name: req
         required: true
         schema:
-          type: object
+          $ref: '#/definitions/chat_sdk.SendFriendRequestReq'
       produces:
       - application/json
       responses:
@@ -724,7 +1166,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 搜索用户，返回ID列表
+      description: 搜索用户，返回用户基本信息列表（用于添加好友等场景）
       parameters:
       - description: 搜索关键字
         in: query
@@ -738,12 +1180,16 @@ paths:
       - application/json
       responses:
         "200":
-          description: 用户ID列表
+          description: 用户列表
           schema:
-            items:
-              format: int64
-              type: integer
-            type: array
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/service.UserBasicDTO'
+                  type: array
+              type: object
         "500":
           description: 服务器错误
           schema:
@@ -753,6 +1199,70 @@ paths:
       summary: 搜索用户 (Member)
       tags:
       - 用户
+  /message/conversation/hide:
+    post:
+      consumes:
+      - application/json
+      description: 将当前用户某个房间的会话从消息列表隐藏（仅影响自己；新消息会自动重新展示）
+      parameters:
+      - description: 房间ID
+        format: int64
+        in: query
+        name: room_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成功响应
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 隐藏会话
+      tags:
+      - 消息
+  /message/conversations:
+    get:
+      consumes:
+      - application/json
+      description: 获取当前用户的会话列表（未删除的会话），包含头像、名称、room、最后一条消息、未读数
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 会话列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/service.ConversationListItemDTO'
+                  type: array
+              type: object
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 获取消息列表
+      tags:
+      - 消息
   /message/detail:
     get:
       consumes:
@@ -790,6 +1300,36 @@ paths:
       summary: 获取消息详情
       tags:
       - 消息
+  /message/forward:
+    post:
+      consumes:
+      - application/json
+      description: 支持逐条转发(single) 或 合并转发(merge)
+      parameters:
+      - description: 转发请求
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/chat_sdk.ForwardMessageReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 创建的消息ID列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  additionalProperties: true
+                  type: object
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 转发消息
+      tags:
+      - 消息
   /message/list:
     get:
       consumes:
@@ -806,9 +1346,9 @@ paths:
         in: query
         name: limit
         type: integer
-      - description: 偏移量
+      - description: 偏移量 以你要查询的ID为基准，向前查询，不传则向后
         in: query
-        name: offset
+        name: mess_id
         type: integer
       produces:
       - application/json
@@ -821,7 +1361,7 @@ paths:
             - properties:
                 data:
                   items:
-                    $ref: '#/definitions/service.MessageDTO'
+                    $ref: '#/definitions/service.MessageListItemDTO'
                   type: array
               type: object
         "400":
@@ -875,18 +1415,17 @@ paths:
       summary: 撤回消息
       tags:
       - 消息
-  /moment/comment/add:
+  /moment/comment:
     post:
       consumes:
       - application/json
-      description: 对动态发表评论，或对评论进行二级回复
       parameters:
-      - description: 评论内容（moment_id, content, parent_id 可选）
+      - description: 评论内容
         in: body
         name: req
         required: true
         schema:
-          type: object
+          $ref: '#/definitions/chat_sdk.CommentMomentReq'
       produces:
       - application/json
       responses:
@@ -894,24 +1433,15 @@ paths:
           description: 成功
           schema:
             $ref: '#/definitions/response.Response'
-        "400":
-          description: 参数错误
-          schema:
-            $ref: '#/definitions/response.Response'
-        "401":
-          description: 未登录
-          schema:
-            $ref: '#/definitions/response.Response'
       security:
       - BearerAuth: []
-      summary: 发表评论或回复
+      summary: 评论动态
       tags:
       - 朋友圈
   /moment/comment/list:
     get:
       consumes:
       - application/json
-      description: 获取某条动态下的评论（时间升序）
       parameters:
       - description: 动态ID
         format: int64
@@ -943,7 +1473,7 @@ paths:
               type: object
       security:
       - BearerAuth: []
-      summary: 获取评论列表
+      summary: 获取动态评论
       tags:
       - 朋友圈
   /moment/create:
@@ -1020,18 +1550,41 @@ paths:
       summary: 朋友圈动态列表
       tags:
       - 朋友圈
+  /room/admin/set:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/chat_sdk.SetGroupAdminReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 设置管理员
+      tags:
+      - Room
   /room/group:
     post:
       consumes:
       - application/json
       description: 创建新的群聊房间
       parameters:
-      - description: 群聊信息（name, members）
+      - description: 创建参数
         in: body
         name: req
         required: true
         schema:
-          type: object
+          $ref: '#/definitions/chat_sdk.CreateGroupRoomReq'
       produces:
       - application/json
       responses:
@@ -1057,6 +1610,98 @@ paths:
       summary: 创建群聊
       tags:
       - 房间
+  /room/group/info:
+    get:
+      consumes:
+      - application/json
+      description: 根据 room_id 获取群聊基础信息（不含成员列表）
+      parameters:
+      - description: 群ID(房间ID)
+        format: int64
+        in: query
+        name: room_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 群信息
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.GroupInfoDTO'
+              type: object
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 获取群基础信息
+      tags:
+      - 房间
+  /room/group/list:
+    get:
+      consumes:
+      - application/json
+      description: 获取当前用户参与的所有群聊（仅 Type=2）
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 群聊列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/service.RoomDTO'
+                  type: array
+              type: object
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 获取用户群聊列表
+      tags:
+      - 房间
+  /room/group/update:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/chat_sdk.UpdateGroupInfoReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 更新群信息
+      tags:
+      - Room
   /room/list:
     get:
       consumes:
@@ -1073,7 +1718,7 @@ paths:
             - properties:
                 data:
                   items:
-                    $ref: '#/definitions/models.Room'
+                    $ref: '#/definitions/service.RoomDTO'
                   type: array
               type: object
         "400":
@@ -1095,18 +1740,12 @@ paths:
       - application/json
       description: 将用户添加到房间
       parameters:
-      - description: 房间ID
-        format: int64
-        in: query
-        name: room_id
+      - description: 成员信息
+        in: body
+        name: req
         required: true
-        type: integer
-      - description: 用户ID
-        format: int64
-        in: query
-        name: user_id
-        required: true
-        type: integer
+        schema:
+          $ref: '#/definitions/chat_sdk.RoomMemberReq'
       produces:
       - application/json
       responses:
@@ -1171,11 +1810,11 @@ paths:
       summary: 检查房间成员
       tags:
       - 房间
-  /room/member/remove:
-    post:
+  /room/member/list:
+    get:
       consumes:
       - application/json
-      description: 将用户从房间移除
+      description: 获取指定房间(群)成员列表，展示名按：好友备注 > 群昵称 > 用户昵称 > 用户名
       parameters:
       - description: 房间ID
         format: int64
@@ -1183,12 +1822,77 @@ paths:
         name: room_id
         required: true
         type: integer
-      - description: 用户ID
-        format: int64
-        in: query
-        name: user_id
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 成员列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/service.RoomMemberListItemDTO'
+                  type: array
+              type: object
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 获取群成员列表
+      tags:
+      - 房间
+  /room/member/nickname:
+    post:
+      consumes:
+      - application/json
+      description: 设置当前用户在指定房间(群)中的昵称（room_user.nickname），仅影响自己视角
+      parameters:
+      - description: 请求参数
+        in: body
+        name: req
         required: true
-        type: integer
+        schema:
+          $ref: '#/definitions/chat_sdk.SetMyGroupNicknameReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 设置群昵称
+      tags:
+      - 房间
+  /room/member/remove:
+    post:
+      consumes:
+      - application/json
+      description: 将用户从房间移除
+      parameters:
+      - description: 成员信息
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/chat_sdk.RoomMemberReq'
       produces:
       - application/json
       responses:
@@ -1209,6 +1913,75 @@ paths:
       summary: 移除房间成员
       tags:
       - 房间
+  /room/mute/group:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/chat_sdk.SetGroupMuteReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 设置群禁言（倒计时）
+      tags:
+      - Room
+  /room/mute/group/scheduled:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/chat_sdk.SetGroupMuteScheduledReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 设置群禁言（定时）
+      tags:
+      - Room
+  /room/mute/user:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/chat_sdk.SetUserMuteReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 设置用户禁言
+      tags:
+      - Room
   /room/private:
     post:
       consumes:
@@ -1252,12 +2025,12 @@ paths:
       - application/json
       description: 更新当前用户头像 URL
       parameters:
-      - description: 头像更新（avatar）
+      - description: 头像更新
         in: body
         name: req
         required: true
         schema:
-          type: object
+          $ref: '#/definitions/chat_sdk.UpdateUserAvatarReq'
       produces:
       - application/json
       responses:
@@ -1277,6 +2050,37 @@ paths:
       security:
       - BearerAuth: []
       summary: 更新用户头像
+      tags:
+      - 用户
+  /user/code/send:
+    post:
+      consumes:
+      - application/json
+      description: 发送验证码到手机号/邮箱（identifier=手机号/邮箱），purpose=register/forgot_password
+      parameters:
+      - description: 发送验证码请求
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/chat_sdk.SendVerifyCodeReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 发送成功
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.SendCodeResult'
+              type: object
+        "400":
+          description: 请求错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 发送验证码
       tags:
       - 用户
   /user/info:
@@ -1319,7 +2123,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 用户登录并返回 token
+      description: 用户登录并返回 token（account 支持 username/phone/email；password 或 code 二选一）
       parameters:
       - description: 登录信息
         in: body
@@ -1352,12 +2156,12 @@ paths:
       - application/json
       description: 修改当前用户密码（验证码/鉴权由调用层保证）
       parameters:
-      - description: 密码修改（new_password）
+      - description: 密码修改
         in: body
         name: req
         required: true
         schema:
-          type: object
+          $ref: '#/definitions/chat_sdk.UpdateUserPasswordReq'
       produces:
       - application/json
       responses:
@@ -1374,11 +2178,37 @@ paths:
       summary: 修改用户密码
       tags:
       - 用户
+  /user/password/forgot:
+    post:
+      consumes:
+      - application/json
+      description: 通过验证码重置密码（identifier 支持 phone/email/username；推荐 phone/email）
+      parameters:
+      - description: 忘记密码请求
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/service.ForgotPasswordReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 重置成功
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: 请求错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      summary: 忘记密码
+      tags:
+      - 用户
   /user/register:
     post:
       consumes:
       - application/json
-      description: 创建新用户账号
+      description: 创建新用户账号：username + (phone/email 二选一) + password + code
       parameters:
       - description: 注册信息
         in: body
@@ -1452,7 +2282,7 @@ paths:
         name: req
         required: true
         schema:
-          type: object
+          $ref: '#/definitions/service.UpdateUserReq'
       produces:
       - application/json
       responses:

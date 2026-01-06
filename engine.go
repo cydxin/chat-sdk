@@ -15,14 +15,16 @@ import (
 )
 
 type ChatEngine struct {
-	config        *Config
-	UserService   *service.UserService
-	RoomService   *service.RoomService
-	MsgService    *service.MessageService
-	MemberService *service.MemberService
-	AuthService   *service.AuthService // 鉴权服务
-	MomentService *service.MomentService
-	WsServer      *WsServer
+	config *Config
+
+	UserService         *service.UserService
+	RoomService         *service.RoomService
+	MsgService          *service.MessageService
+	MemberService       *service.MemberService
+	AuthService         *service.AuthService // 鉴权服务
+	MomentService       *service.MomentService
+	ConversationService *service.ConversationService
+	WsServer            *WsServer
 }
 
 var (
@@ -41,9 +43,7 @@ func NewEngine(opts ...Option) *ChatEngine {
 			opt(c)
 		}
 
-		Instance = &ChatEngine{
-			config: c,
-		}
+		Instance = &ChatEngine{config: c}
 
 		// 初始化 WS
 		Instance.WsServer = NewWsServer()
@@ -63,6 +63,7 @@ func NewEngine(opts ...Option) *ChatEngine {
 		Instance.MsgService = service.NewMessageService(baseService)
 		Instance.MemberService = service.NewMemberService(baseService)
 		Instance.MomentService = service.NewMomentService(baseService)
+		Instance.ConversationService = service.NewConversationService(baseService)
 		Instance.AuthService = service.NewAuthService(c.RDB) // 初始化鉴权服务
 
 		// 迁移表
@@ -72,63 +73,61 @@ func NewEngine(opts ...Option) *ChatEngine {
 
 		//  使用闭包处理消息
 		Instance.WsServer.onMessage = func(client *Client, msg []byte) {
-			// 固定的参数
 			var req message.Req
 			if err := json.Unmarshal(msg, &req); err != nil {
 				log.Printf("Invalid message format: %v", err)
 				return
 			}
-			log.Printf("Received message: %s", msg)
-			// 1. 通过 RoomAccount（字符串）查找房间
+
 			room, err := Instance.RoomService.GetRoomByID(req.SendTo)
 			if err != nil {
-				log.Printf("Room not found: %s, error: %v", req.SendTo, err)
+				log.Printf("Room not found: %d, error: %v", req.SendTo, err)
 				return
 			}
 
-			// 2. 使用 Room.ID（数字）保存消息
-			var senderID uint64
-			senderID = client.UserID
+			senderID := client.UserID
 			savedMsg, err := Instance.MsgService.SaveMessage(room.ID, senderID, req.SendContent, req.SendType)
 			if err != nil {
 				log.Printf("Failed to save message: %v", err)
 				return
 			}
 
-			// 3. 获取房间成员（使用 Room.ID）
 			members, err := Instance.RoomService.GetRoomMembers(room.ID)
 			if err != nil {
 				log.Printf("Failed to get room members: %v", err)
 				return
 			}
-			log.Printf("members : %s", members)
 
-			// 4. 构建响应消息
 			resp := struct {
-				ID        uint64    `json:"id"`
-				RoomID    string    `json:"room_id"` // 返回对外房间号/群号（兼容字段名）
-				SenderID  uint64    `json:"sender_id"`
-				MsgType   uint8     `json:"msg_type"`
-				Content   string    `json:"content"`
-				CreatedAt time.Time `json:"created_at"`
+				ID             uint64    `json:"id"`
+				RoomID         uint64    `json:"room_id"`
+				RoomType       uint8     `json:"room_type"`
+				SenderID       uint64    `json:"sender_id"`
+				SenderNickname string    `json:"sender_nickname"`
+				SenderAvatar   string    `json:"sender_avatar"`
+				MsgType        uint8     `json:"msg_type"`
+				Content        string    `json:"content"`
+				CreatedAt      time.Time `json:"created_at"`
 			}{
 				ID:        savedMsg.ID,
-				RoomID:    room.RoomAccount,
+				RoomID:    room.ID,
+				RoomType:  room.Type,
 				SenderID:  savedMsg.SenderID,
 				MsgType:   savedMsg.Type,
 				Content:   savedMsg.Content,
 				CreatedAt: savedMsg.CreatedAt,
 			}
+			if client != nil {
+				resp.SenderNickname = client.Nickname
+				resp.SenderAvatar = client.Avatar
+			}
 
 			respBytes, _ := json.Marshal(resp)
-
-			// 5. 推送给所有房间成员
 			for _, memberID := range members {
-				log.Printf("Push message to member: %d", memberID)
 				if memberID == senderID {
 					continue
 				}
-				Instance.WsServer.SendToUser(uint64(memberID), respBytes)
+				Instance.WsServer.SendToUser(memberID, respBytes)
 			}
 		}
 
@@ -167,6 +166,11 @@ func (c *ChatEngine) AutoMigrate() error {
 
 // ServeWS 处理 WebSocket 请求，需要传入 userID 和 name
 func (c *ChatEngine) ServeWS(w http.ResponseWriter, r *http.Request, userID uint64, name string) {
+	user, err := Instance.UserService.GetUser(userID)
+	if err == nil && user != nil {
+		c.WsServer.ServeWS(w, r, userID, name, user.Nickname, user.Avatar)
+		return
+	}
 	c.WsServer.ServeWS(w, r, userID, name)
 }
 

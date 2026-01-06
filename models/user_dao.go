@@ -136,3 +136,61 @@ func (dao *UserDAO) SearchUsers(keyword string, excludeUserID uint64, limit, off
 func (dao *UserDAO) IsNotFound(err error) bool {
 	return errors.Is(err, gorm.ErrRecordNotFound)
 }
+
+func (dao *UserDAO) FindByAccount(account string) (*User, error) {
+	account = strings.TrimSpace(account)
+	if account == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if strings.Contains(account, "@") {
+		return dao.FindByEmail(strings.ToLower(account))
+	}
+
+	u, err := dao.FindByUsername(account)
+	if err == nil {
+		return u, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return dao.FindByPhone(account)
+	}
+	return nil, err
+}
+
+// ExistsByAccount 检查 username/phone/email 任意一种是否存在（用于注册唯一性校验）。
+func (dao *UserDAO) ExistsByAccount(username, phone, email string) (bool, error) {
+	username = strings.TrimSpace(username)
+	phone = strings.TrimSpace(phone)
+	email = strings.TrimSpace(email)
+	if strings.Contains(email, "@") {
+		email = strings.ToLower(email)
+	}
+
+	if username != "" {
+		exists, err := dao.ExistsByUsername(username)
+		if err != nil {
+			return false, err
+		}
+		if exists {
+			return true, nil
+		}
+	}
+	if phone != "" {
+		exists, err := dao.ExistsByPhone(phone)
+		if err != nil {
+			return false, err
+		}
+		if exists {
+			return true, nil
+		}
+	}
+	if email != "" {
+		exists, err := dao.ExistsByEmail(email)
+		if err != nil {
+			return false, err
+		}
+		if exists {
+			return true, nil
+		}
+	}
+	return false, nil
+}

@@ -27,6 +27,31 @@ type MessageDTO struct {
 	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
+// SenderDTO 发送人信息（用于消息列表返回）
+type SenderDTO struct {
+	ID       uint64 `json:"id"`
+	Username string `json:"username"`
+	Nickname string `json:"nickname"`
+	Avatar   string `json:"avatar"`
+}
+
+// MessageListItemDTO 消息列表项（带发送人信息；不返回 Room，避免冗余/递归）
+type MessageListItemDTO struct {
+	ID           uint64         `json:"id"`
+	RoomID       uint64         `json:"room_id"`
+	SenderID     uint64         `json:"sender_id"`
+	Sender       *SenderDTO     `json:"sender,omitempty"`
+	ReplyToMsgID *uint64        `json:"reply_to_msg_id,omitempty"`
+	Type         uint8          `json:"type"`
+	Content      string         `json:"content"`
+	Extra        datatypes.JSON `json:"extra,omitempty"`
+	IsSystem     bool           `json:"is_system"`
+	IsEncrypted  bool           `json:"is_encrypted"`
+	Status       uint8          `json:"status"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+}
+
 // ToMessageDTO 将 Message 转换为 MessageDTO
 func ToMessageDTO(msg *models.Message) *MessageDTO {
 	if msg == nil {
@@ -49,7 +74,34 @@ func ToMessageDTO(msg *models.Message) *MessageDTO {
 	}
 }
 
-// ToMessageDTOs 批量转换
+func toSenderDTO(u *models.User) *SenderDTO {
+	if u == nil {
+		return nil
+	}
+	return &SenderDTO{ID: u.ID, Username: u.Username, Nickname: u.Nickname, Avatar: u.Avatar}
+}
+
+func toMessageListItemDTO(m *models.Message) *MessageListItemDTO {
+	if m == nil {
+		return nil
+	}
+	return &MessageListItemDTO{
+		ID:           m.ID,
+		RoomID:       m.RoomID,
+		SenderID:     m.SenderID,
+		Sender:       toSenderDTO(&m.Sender),
+		ReplyToMsgID: m.ReplyToMsgID,
+		Type:         m.Type,
+		Content:      m.Content,
+		Extra:        m.Extra,
+		IsSystem:     m.IsSystem,
+		IsEncrypted:  m.IsEncrypted,
+		Status:       m.Status,
+		CreatedAt:    m.CreatedAt,
+		UpdatedAt:    m.UpdatedAt,
+	}
+}
+
 func ToMessageDTOs(msgs []models.Message) []MessageDTO {
 	dtos := make([]MessageDTO, len(msgs))
 	for i, msg := range msgs {
@@ -58,6 +110,16 @@ func ToMessageDTOs(msgs []models.Message) []MessageDTO {
 		}
 	}
 	return dtos
+}
+
+func toMessageListItemDTOs(msgs []models.Message) []MessageListItemDTO {
+	out := make([]MessageListItemDTO, 0, len(msgs))
+	for i := range msgs {
+		if dto := toMessageListItemDTO(&msgs[i]); dto != nil {
+			out = append(out, *dto)
+		}
+	}
+	return out
 }
 
 type MessageService struct {
@@ -72,6 +134,11 @@ func NewMessageService(s *Service) *MessageService {
 
 // SaveMessage 保存消息到数据库
 func (s *MessageService) SaveMessage(roomID uint64, senderID uint64, content string, msgType uint8) (*models.Message, error) {
+	// 1. Check Mute Status
+	if err := s.checkMuteStatus(roomID, senderID); err != nil {
+		return nil, err
+	}
+
 	msg := &models.Message{
 		//MessageID: uuid.New().String(), // 生成唯一的消息 ID
 		RoomID:   roomID,
@@ -81,7 +148,85 @@ func (s *MessageService) SaveMessage(roomID uint64, senderID uint64, content str
 		Status:   models.MessageStatusSent, // 默认状态为已发送
 	}
 	err := s.messageDAO.Create(msg)
-	return msg, err
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. 发送消息后：把该房间的会话默认展示出来（对每个成员按用户维度设置）
+	var memberIDs []uint64
+	_ = s.DB.Model(&models.RoomUser{}).
+		Where("room_id = ?", roomID).
+		Pluck("user_id", &memberIDs).Error
+
+	if len(memberIDs) > 0 {
+		now := time.Now()
+		for _, uid := range memberIDs {
+			// Upsert conversation
+			conv := &models.Conversation{UserID: uid, RoomID: roomID}
+			_ = s.DB.FirstOrCreate(conv, map[string]any{"user_id": uid, "room_id": roomID}).Error
+			_ = s.DB.Model(&models.Conversation{}).
+				Where("user_id = ? AND room_id = ?", uid, roomID).
+				Updates(map[string]any{
+					"is_visible":      true,
+					"last_message_id": msg.ID,
+					"updated_at":      now,
+				}).Error
+		}
+	}
+
+	return msg, nil
+}
+
+func (s *MessageService) checkMuteStatus(roomID, userID uint64) error {
+	var room models.Room
+	if err := s.DB.First(&room, roomID).Error; err != nil {
+		return err
+	}
+
+	var member models.RoomUser
+	if err := s.DB.Where("room_id = ? AND user_id = ?", roomID, userID).First(&member).Error; err != nil {
+		return err // Not a member?
+	}
+
+	// Admin/Owner bypass mute
+	if member.Role > 0 {
+		return nil
+	}
+
+	now := time.Now()
+
+	// 1. Check User Mute
+	if member.IsMuted && member.MutedUntil != nil && member.MutedUntil.After(now) {
+		return fmt.Errorf("you are muted until %s", member.MutedUntil.Format("2006-01-02 15:04:05"))
+	}
+
+	// 2. Check Global Mute (Countdown)
+	if room.IsMute && room.MuteUntil != nil && room.MuteUntil.After(now) {
+		return fmt.Errorf("group is muted until %s", room.MuteUntil.Format("2006-01-02 15:04:05"))
+	}
+
+	// 3. Check Global Mute (Scheduled)
+	if room.MuteDailyDuration > 0 && room.MuteDailyStartTime != "" {
+		// Parse start time
+		t, err := time.Parse("15:04", room.MuteDailyStartTime)
+		if err == nil {
+			// Check two windows: starting today and starting yesterday
+			startToday := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, now.Location())
+			endToday := startToday.Add(time.Duration(room.MuteDailyDuration) * time.Minute)
+
+			if now.After(startToday) && now.Before(endToday) {
+				return fmt.Errorf("group is muted daily from %s for %d minutes", room.MuteDailyStartTime, room.MuteDailyDuration)
+			}
+
+			startYesterday := startToday.Add(-24 * time.Hour)
+			endYesterday := startYesterday.Add(time.Duration(room.MuteDailyDuration) * time.Minute)
+			if now.After(startYesterday) && now.Before(endYesterday) {
+				return fmt.Errorf("group is muted daily from %s for %d minutes", room.MuteDailyStartTime, room.MuteDailyDuration)
+			}
+		}
+	}
+
+	return nil
 }
 
 /*
@@ -163,6 +308,26 @@ func (s *MessageService) RecallMessage(messageID, userID uint64, recallType uint
 func (s *MessageService) GetRoomMessages(roomID uint64, limit, offset int) ([]models.Message, error) {
 	dao := s.messageDAO
 	return dao.FindByRoomID(roomID, limit, offset)
+}
+
+// GetRoomMessagesDTO 获取房间消息列表（分页，带发送人信息，返回 DTO）
+func (s *MessageService) GetRoomMessagesDTO(roomID uint64, limit, messId int) ([]MessageListItemDTO, error) {
+	var msgs []models.Message
+	// 这里不走 DAO：需要 preload sender
+	//err
+	query := s.DB.Model(&models.Message{}).
+		Preload("Sender").
+		Where("room_id = ?", roomID)
+	if messId > 0 {
+		query = query.Where("id < ?", messId)
+	}
+	err := query.Order("created_at DESC").
+		Limit(limit).
+		Find(&msgs).Error
+	if err != nil {
+		return nil, err
+	}
+	return toMessageListItemDTOs(msgs), nil
 }
 
 // GetMessageByID 根据ID获取消息

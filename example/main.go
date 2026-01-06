@@ -72,10 +72,22 @@ func main() {
 	api := r.Group("/api/v1")
 
 	// 消息模块
+	messageAPI := api.Group("/message")
+	{
+		messageAPI.GET("/conversations", engine.GinHandleGetMessageConversations)
+		messageAPI.POST("/conversation/hide", engine.GinHandleHideConversation)
+		messageAPI.GET("/list", engine.GinHandleGetRoomMessages)
+		messageAPI.GET("/detail", engine.GinHandleGetMessageByID)
+		messageAPI.POST("/recall", engine.GinHandleRecallMessage)
+	}
+
+	// 消息模块
 	userAPI := api.Group("/user")
 	{
 		userAPI.POST("/register", engine.GinHandleUserRegister)
 		userAPI.POST("/login", engine.GinHandleUserLogin)
+		userAPI.POST("/code/send", engine.GinHandleSendVerifyCode)
+		userAPI.POST("/password/forgot", engine.GinHandleForgotPassword)
 		userAPI.GET("/info", engine.GinHandleGetUserInfo)
 		userAPI.POST("/update", engine.GinHandleUpdateUserInfo)
 		userAPI.POST("/avatar", engine.GinHandleUpdateUserAvatar)
@@ -90,6 +102,7 @@ func main() {
 		friendAPI.POST("/accept", engine.GinHandleAcceptFriendRequest)
 		friendAPI.POST("/reject", engine.GinHandleRejectFriendRequest)
 		friendAPI.DELETE("/delete", engine.GinHandleDeleteFriend)
+		friendAPI.POST("/remark", engine.GinHandleSetFriendRemark)
 		friendAPI.GET("/list", engine.GinHandleGetFriendList)
 		friendAPI.GET("/pending", engine.GinHandleGetPendingRequests)
 	}
@@ -99,6 +112,11 @@ func main() {
 	{
 		roomAPI.POST("/private", engine.GinHandleCreatePrivateRoom)
 		roomAPI.POST("/group", engine.GinHandleCreateGroupRoom)
+		roomAPI.GET("/group/info", engine.GinHandleGetGroupInfo)
+		roomAPI.GET("/list", engine.GinHandleGetUserRooms)
+		roomAPI.GET("/group/list", engine.GinHandleGetGroupRooms)
+		roomAPI.GET("/member/list", engine.GinHandleGetRoomMemberList)
+		roomAPI.POST("/member/nickname", engine.GinHandleSetMyGroupNickname)
 		roomAPI.POST("/member/add", engine.GinHandleAddRoomMember)
 		roomAPI.POST("/member/remove", engine.GinHandleRemoveRoomMember)
 	}

@@ -221,7 +221,7 @@ const docTemplate = `{
                                         "data": {
                                             "type": "array",
                                             "items": {
-                                                "$ref": "#/definitions/models.Friend"
+                                                "$ref": "#/definitions/service.UserDTO"
                                             }
                                         }
                                     }
@@ -251,7 +251,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "获取当前用户待处理的好友申请列表",
+                "description": "获取当前用户的好友申请列表",
                 "consumes": [
                     "application/json"
                 ],
@@ -261,7 +261,7 @@ const docTemplate = `{
                 "tags": [
                     "好友"
                 ],
-                "summary": "获取待处理好友申请",
+                "summary": "获取好友申请",
                 "responses": {
                     "200": {
                         "description": "好友申请列表",
@@ -276,7 +276,7 @@ const docTemplate = `{
                                         "data": {
                                             "type": "array",
                                             "items": {
-                                                "$ref": "#/definitions/models.FriendApply"
+                                                "$ref": "#/definitions/service.FriendApplyDTO"
                                             }
                                         }
                                     }
@@ -349,6 +349,57 @@ const docTemplate = `{
                 }
             }
         },
+        "/friend/remark": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "设置当前用户对某个好友的备注（仅影响自己视角）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "好友"
+                ],
+                "summary": "设置好友备注",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.SetFriendRemarkReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/friend/request": {
             "post": {
                 "security": [
@@ -369,12 +420,12 @@ const docTemplate = `{
                 "summary": "发送好友申请",
                 "parameters": [
                     {
-                        "description": "好友申请（to_user, message）",
+                        "description": "好友申请",
                         "name": "req",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/chat_sdk.SendFriendRequestReq"
                         }
                     }
                 ],
@@ -407,7 +458,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "搜索用户，返回ID列表",
+                "description": "搜索用户，返回用户基本信息列表（用于添加好友等场景）",
                 "consumes": [
                     "application/json"
                 ],
@@ -434,19 +485,135 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "用户ID列表",
+                        "description": "用户列表",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "type": "integer",
-                                "format": "int64"
-                            }
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/service.UserBasicDTO"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "500": {
                         "description": "服务器错误",
                         "schema": {
                             "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/message/conversation/hide": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "将当前用户某个房间的会话从消息列表隐藏（仅影响自己；新消息会自动重新展示）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "消息"
+                ],
+                "summary": "隐藏会话",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "房间ID",
+                        "name": "room_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成功响应",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/message/conversations": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "获取当前用户的会话列表（未删除的会话），包含头像、名称、room、最后一条消息、未读数",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "消息"
+                ],
+                "summary": "获取消息列表",
+                "responses": {
+                    "200": {
+                        "description": "会话列表",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/service.ConversationListItemDTO"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
                         }
                     }
                 }
@@ -514,6 +681,58 @@ const docTemplate = `{
                 }
             }
         },
+        "/message/forward": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "支持逐条转发(single) 或 合并转发(merge)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "消息"
+                ],
+                "summary": "转发消息",
+                "parameters": [
+                    {
+                        "description": "转发请求",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.ForwardMessageReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "创建的消息ID列表",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/message/list": {
             "get": {
                 "security": [
@@ -549,8 +768,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "偏移量",
-                        "name": "offset",
+                        "description": "偏移量 以你要查询的ID为基准，向前查询，不传则向后",
+                        "name": "mess_id",
                         "in": "query"
                     }
                 ],
@@ -568,7 +787,7 @@ const docTemplate = `{
                                         "data": {
                                             "type": "array",
                                             "items": {
-                                                "$ref": "#/definitions/service.MessageDTO"
+                                                "$ref": "#/definitions/service.MessageListItemDTO"
                                             }
                                         }
                                     }
@@ -649,14 +868,13 @@ const docTemplate = `{
                 }
             }
         },
-        "/moment/comment/add": {
+        "/moment/comment": {
             "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
                 ],
-                "description": "对动态发表评论，或对评论进行二级回复",
                 "consumes": [
                     "application/json"
                 ],
@@ -666,33 +884,21 @@ const docTemplate = `{
                 "tags": [
                     "朋友圈"
                 ],
-                "summary": "发表评论或回复",
+                "summary": "评论动态",
                 "parameters": [
                     {
-                        "description": "评论内容（moment_id, content, parent_id 可选）",
+                        "description": "评论内容",
                         "name": "req",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/chat_sdk.CommentMomentReq"
                         }
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "成功",
-                        "schema": {
-                            "$ref": "#/definitions/response.Response"
-                        }
-                    },
-                    "400": {
-                        "description": "参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/response.Response"
-                        }
-                    },
-                    "401": {
-                        "description": "未登录",
                         "schema": {
                             "$ref": "#/definitions/response.Response"
                         }
@@ -707,7 +913,6 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "获取某条动态下的评论（时间升序）",
                 "consumes": [
                     "application/json"
                 ],
@@ -717,7 +922,7 @@ const docTemplate = `{
                 "tags": [
                     "朋友圈"
                 ],
-                "summary": "获取评论列表",
+                "summary": "获取动态评论",
                 "parameters": [
                     {
                         "type": "integer",
@@ -891,6 +1096,44 @@ const docTemplate = `{
                 }
             }
         },
+        "/room/admin/set": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Room"
+                ],
+                "summary": "设置管理员",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.SetGroupAdminReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/room/group": {
             "post": {
                 "security": [
@@ -911,12 +1154,12 @@ const docTemplate = `{
                 "summary": "创建群聊",
                 "parameters": [
                     {
-                        "description": "群聊信息（name, members）",
+                        "description": "创建参数",
                         "name": "req",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/chat_sdk.CreateGroupRoomReq"
                         }
                     }
                 ],
@@ -947,6 +1190,161 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/room/group/info": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "根据 room_id 获取群聊基础信息（不含成员列表）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "房间"
+                ],
+                "summary": "获取群基础信息",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "群ID(房间ID)",
+                        "name": "room_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "群信息",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.GroupInfoDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/room/group/list": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "获取当前用户参与的所有群聊（仅 Type=2）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "房间"
+                ],
+                "summary": "获取用户群聊列表",
+                "responses": {
+                    "200": {
+                        "description": "群聊列表",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/service.RoomDTO"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/room/group/update": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Room"
+                ],
+                "summary": "更新群信息",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.UpdateGroupInfoReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/response.Response"
                         }
@@ -986,7 +1384,7 @@ const docTemplate = `{
                                         "data": {
                                             "type": "array",
                                             "items": {
-                                                "$ref": "#/definitions/models.Room"
+                                                "$ref": "#/definitions/service.RoomDTO"
                                             }
                                         }
                                     }
@@ -1029,20 +1427,13 @@ const docTemplate = `{
                 "summary": "添加房间成员",
                 "parameters": [
                     {
-                        "type": "integer",
-                        "format": "int64",
-                        "description": "房间ID",
-                        "name": "room_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "format": "int64",
-                        "description": "用户ID",
-                        "name": "user_id",
-                        "in": "query",
-                        "required": true
+                        "description": "成员信息",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.RoomMemberReq"
+                        }
                     }
                 ],
                 "responses": {
@@ -1139,6 +1530,122 @@ const docTemplate = `{
                 }
             }
         },
+        "/room/member/list": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "获取指定房间(群)成员列表，展示名按：好友备注 \u003e 群昵称 \u003e 用户昵称 \u003e 用户名",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "房间"
+                ],
+                "summary": "获取群成员列表",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "房间ID",
+                        "name": "room_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "成员列表",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/service.RoomMemberListItemDTO"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/room/member/nickname": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "设置当前用户在指定房间(群)中的昵称（room_user.nickname），仅影响自己视角",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "房间"
+                ],
+                "summary": "设置群昵称",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.SetMyGroupNicknameReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/room/member/remove": {
             "post": {
                 "security": [
@@ -1159,20 +1666,13 @@ const docTemplate = `{
                 "summary": "移除房间成员",
                 "parameters": [
                     {
-                        "type": "integer",
-                        "format": "int64",
-                        "description": "房间ID",
-                        "name": "room_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "format": "int64",
-                        "description": "用户ID",
-                        "name": "user_id",
-                        "in": "query",
-                        "required": true
+                        "description": "成员信息",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.RoomMemberReq"
+                        }
                     }
                 ],
                 "responses": {
@@ -1190,6 +1690,120 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/room/mute/group": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Room"
+                ],
+                "summary": "设置群禁言（倒计时）",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.SetGroupMuteReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/room/mute/group/scheduled": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Room"
+                ],
+                "summary": "设置群禁言（定时）",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.SetGroupMuteScheduledReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/room/mute/user": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Room"
+                ],
+                "summary": "设置用户禁言",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.SetUserMuteReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/response.Response"
                         }
@@ -1279,12 +1893,12 @@ const docTemplate = `{
                 "summary": "更新用户头像",
                 "parameters": [
                     {
-                        "description": "头像更新（avatar）",
+                        "description": "头像更新",
                         "name": "req",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/chat_sdk.UpdateUserAvatarReq"
                         }
                     }
                 ],
@@ -1301,6 +1915,58 @@ const docTemplate = `{
                                     "properties": {
                                         "data": {
                                             "$ref": "#/definitions/service.UserDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "请求错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/user/code/send": {
+            "post": {
+                "description": "发送验证码到手机号/邮箱（identifier=手机号/邮箱），purpose=register/forgot_password",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户"
+                ],
+                "summary": "发送验证码",
+                "parameters": [
+                    {
+                        "description": "发送验证码请求",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.SendVerifyCodeReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "发送成功",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.SendCodeResult"
                                         }
                                     }
                                 }
@@ -1379,7 +2045,7 @@ const docTemplate = `{
         },
         "/user/login": {
             "post": {
-                "description": "用户登录并返回 token",
+                "description": "用户登录并返回 token（account 支持 username/phone/email；password 或 code 二选一）",
                 "consumes": [
                     "application/json"
                 ],
@@ -1449,12 +2115,12 @@ const docTemplate = `{
                 "summary": "修改用户密码",
                 "parameters": [
                     {
-                        "description": "密码修改（new_password）",
+                        "description": "密码修改",
                         "name": "req",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/chat_sdk.UpdateUserPasswordReq"
                         }
                     }
                 ],
@@ -1474,9 +2140,49 @@ const docTemplate = `{
                 }
             }
         },
+        "/user/password/forgot": {
+            "post": {
+                "description": "通过验证码重置密码（identifier 支持 phone/email/username；推荐 phone/email）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户"
+                ],
+                "summary": "忘记密码",
+                "parameters": [
+                    {
+                        "description": "忘记密码请求",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/service.ForgotPasswordReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "重置成功",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "400": {
+                        "description": "请求错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/user/register": {
             "post": {
-                "description": "创建新用户账号",
+                "description": "创建新用户账号：username + (phone/email 二选一) + password + code",
                 "consumes": [
                     "application/json"
                 ],
@@ -1608,7 +2314,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/service.UpdateUserReq"
                         }
                     }
                 ],
@@ -1642,6 +2348,283 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "chat_sdk.CommentMomentReq": {
+            "type": "object",
+            "required": [
+                "content",
+                "moment_id"
+            ],
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "moment_id": {
+                    "type": "integer"
+                },
+                "parent_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "chat_sdk.CreateGroupRoomReq": {
+            "type": "object",
+            "required": [
+                "members",
+                "name"
+            ],
+            "properties": {
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "chat_sdk.ForwardMessageReq": {
+            "type": "object",
+            "required": [
+                "items",
+                "to_room_ids"
+            ],
+            "properties": {
+                "comment": {
+                    "type": "string"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "message_id": {
+                                "type": "integer"
+                            }
+                        }
+                    }
+                },
+                "mode": {
+                    "description": "merge/single",
+                    "type": "string",
+                    "example": "merge"
+                },
+                "to_room_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        "chat_sdk.RoomMemberReq": {
+            "type": "object",
+            "required": [
+                "room_id"
+            ],
+            "properties": {
+                "room_id": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "user_id": {
+                    "description": "remove 用",
+                    "type": "integer",
+                    "example": 1001
+                },
+                "user_ids": {
+                    "description": "add 用（批量）",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    },
+                    "example": [
+                        1001
+                    ]
+                }
+            }
+        },
+        "chat_sdk.SendFriendRequestReq": {
+            "type": "object",
+            "required": [
+                "to_user"
+            ],
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "example": "你好，交个朋友"
+                },
+                "to_user": {
+                    "type": "integer",
+                    "example": 1001
+                }
+            }
+        },
+        "chat_sdk.SendVerifyCodeReq": {
+            "type": "object",
+            "required": [
+                "identifier",
+                "purpose"
+            ],
+            "properties": {
+                "identifier": {
+                    "description": "手机号或邮箱",
+                    "type": "string",
+                    "example": "13800138000"
+                },
+                "purpose": {
+                    "description": "register/forgot_password",
+                    "type": "string",
+                    "example": "register"
+                }
+            }
+        },
+        "chat_sdk.SetFriendRemarkReq": {
+            "type": "object",
+            "required": [
+                "friend_id"
+            ],
+            "properties": {
+                "friend_id": {
+                    "type": "integer",
+                    "example": 1002
+                },
+                "remark": {
+                    "type": "string",
+                    "example": "老板"
+                }
+            }
+        },
+        "chat_sdk.SetGroupAdminReq": {
+            "type": "object",
+            "required": [
+                "room_id",
+                "target_user_id"
+            ],
+            "properties": {
+                "is_admin": {
+                    "type": "boolean"
+                },
+                "room_id": {
+                    "type": "integer"
+                },
+                "target_user_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "chat_sdk.SetGroupMuteReq": {
+            "type": "object",
+            "required": [
+                "room_id"
+            ],
+            "properties": {
+                "duration_minutes": {
+                    "description": "0 to cancel",
+                    "type": "integer"
+                },
+                "room_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "chat_sdk.SetGroupMuteScheduledReq": {
+            "type": "object",
+            "required": [
+                "duration_minutes",
+                "room_id",
+                "start_time"
+            ],
+            "properties": {
+                "duration_minutes": {
+                    "type": "integer"
+                },
+                "room_id": {
+                    "type": "integer"
+                },
+                "start_time": {
+                    "description": "HH:MM",
+                    "type": "string"
+                }
+            }
+        },
+        "chat_sdk.SetMyGroupNicknameReq": {
+            "type": "object",
+            "required": [
+                "room_id"
+            ],
+            "properties": {
+                "nickname": {
+                    "type": "string",
+                    "example": "我在群里的昵称"
+                },
+                "room_id": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
+        },
+        "chat_sdk.SetUserMuteReq": {
+            "type": "object",
+            "required": [
+                "room_id",
+                "target_user_id"
+            ],
+            "properties": {
+                "duration_minutes": {
+                    "description": "0 to cancel",
+                    "type": "integer"
+                },
+                "room_id": {
+                    "type": "integer"
+                },
+                "target_user_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "chat_sdk.UpdateGroupInfoReq": {
+            "type": "object",
+            "required": [
+                "room_id"
+            ],
+            "properties": {
+                "avatar": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "room_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "chat_sdk.UpdateUserAvatarReq": {
+            "type": "object",
+            "required": [
+                "avatar"
+            ],
+            "properties": {
+                "avatar": {
+                    "type": "string",
+                    "example": "https://example.com/avatar.jpg"
+                }
+            }
+        },
+        "chat_sdk.UpdateUserPasswordReq": {
+            "type": "object",
+            "required": [
+                "new_password"
+            ],
+            "properties": {
+                "new_password": {
+                    "type": "string",
+                    "example": "123456"
+                }
+            }
+        },
         "gorm.DeletedAt": {
             "type": "object",
             "properties": {
@@ -1870,6 +2853,10 @@ const docTemplate = `{
                     "description": "是否端到端加密",
                     "type": "boolean"
                 },
+                "isMute": {
+                    "description": "新增禁言相关字段",
+                    "type": "boolean"
+                },
                 "memberLimit": {
                     "description": "成员上限",
                     "type": "integer"
@@ -1879,6 +2866,18 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/models.Message"
                     }
+                },
+                "muteDailyDuration": {
+                    "description": "每日禁言持续时长（分钟）",
+                    "type": "integer"
+                },
+                "muteDailyStartTime": {
+                    "description": "每日禁言开始时间 \"HH:MM\"",
+                    "type": "string"
+                },
+                "muteUntil": {
+                    "description": "全员禁言截止时间（倒计时模式）",
+                    "type": "string"
                 },
                 "name": {
                     "description": "房间名称",
@@ -2096,6 +3095,46 @@ const docTemplate = `{
                 }
             }
         },
+        "service.ConversationListItemDTO": {
+            "type": "object",
+            "properties": {
+                "avatar": {
+                    "description": "私聊：对方头像；群聊：群头像",
+                    "type": "string"
+                },
+                "conversation_id": {
+                    "type": "integer"
+                },
+                "last_message": {
+                    "$ref": "#/definitions/service.MessageDTO"
+                },
+                "name": {
+                    "description": "私聊：对方昵称；群聊：群名",
+                    "type": "string"
+                },
+                "room_account": {
+                    "type": "string"
+                },
+                "room_id": {
+                    "type": "integer"
+                },
+                "room_type": {
+                    "description": "1-私聊 2-群聊",
+                    "type": "integer"
+                },
+                "unread_count": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "description": "unix seconds for easy sort/render",
+                    "type": "integer"
+                },
+                "user_id": {
+                    "description": "私聊时为对方用户ID，群聊时为0",
+                    "type": "integer"
+                }
+            }
+        },
         "service.CreateMomentReq": {
             "type": "object",
             "properties": {
@@ -2115,6 +3154,67 @@ const docTemplate = `{
                 }
             }
         },
+        "service.ForgotPasswordReq": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "identifier": {
+                    "description": "phone/email/username(这里允许 username，但更推荐 phone/email)",
+                    "type": "string"
+                },
+                "new_password": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.FriendApplyDTO": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "from_user": {
+                    "$ref": "#/definitions/service.UserBasicDTO"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "integer"
+                }
+            }
+        },
+        "service.GroupInfoDTO": {
+            "type": "object",
+            "properties": {
+                "avatar": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "creator_id": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "room_account": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "service.LoginReq": {
             "type": "object",
             "properties": {
@@ -2122,8 +3222,12 @@ const docTemplate = `{
                     "description": "username/phone/email",
                     "type": "string"
                 },
+                "code": {
+                    "description": "验证码（可选：与 password 二选一）",
+                    "type": "string"
+                },
                 "password": {
-                    "description": "plaintext",
+                    "description": "plaintext（可选：与 code 二选一）",
                     "type": "string"
                 }
             }
@@ -2171,6 +3275,53 @@ const docTemplate = `{
                 },
                 "room_id": {
                     "type": "integer"
+                },
+                "sender_id": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "integer"
+                },
+                "type": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.MessageListItemDTO": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "extra": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_encrypted": {
+                    "type": "boolean"
+                },
+                "is_system": {
+                    "type": "boolean"
+                },
+                "reply_to_msg_id": {
+                    "type": "integer"
+                },
+                "room_id": {
+                    "type": "integer"
+                },
+                "sender": {
+                    "$ref": "#/definitions/service.SenderDTO"
                 },
                 "sender_id": {
                     "type": "integer"
@@ -2236,7 +3387,150 @@ const docTemplate = `{
         "service.RegisterReq": {
             "type": "object",
             "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "email": {
+                    "description": "phone/email 二选一",
+                    "type": "string"
+                },
                 "password": {
+                    "type": "string"
+                },
+                "phone": {
+                    "description": "phone/email 二选一",
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.RoomDTO": {
+            "type": "object",
+            "properties": {
+                "avatar": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "last_message": {
+                    "$ref": "#/definitions/service.MessageDTO"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "room_account": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "integer"
+                },
+                "unread_count": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.RoomMemberListItemDTO": {
+            "type": "object",
+            "properties": {
+                "avatar": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "group_nickname": {
+                    "description": "群昵称（room_user.nickname）",
+                    "type": "string"
+                },
+                "is_muted": {
+                    "type": "boolean"
+                },
+                "nickname": {
+                    "type": "string"
+                },
+                "remark": {
+                    "description": "好友备注（当前用户视角）",
+                    "type": "string"
+                },
+                "role": {
+                    "type": "integer"
+                },
+                "user_id": {
+                    "type": "integer"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.SendCodeResult": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "description": "是否返回由上层/调用方决定；这里总是返回，便于集成发送通道与测试",
+                    "type": "string"
+                },
+                "ttl_seconds": {
+                    "type": "integer"
+                }
+            }
+        },
+        "service.SenderDTO": {
+            "type": "object",
+            "properties": {
+                "avatar": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "nickname": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.UpdateUserReq": {
+            "type": "object",
+            "properties": {
+                "birthday": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "gender": {
+                    "type": "integer"
+                },
+                "nickname": {
+                    "type": "string"
+                },
+                "phone": {
+                    "type": "string"
+                },
+                "signature": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.UserBasicDTO": {
+            "type": "object",
+            "properties": {
+                "avatar": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "nickname": {
                     "type": "string"
                 },
                 "username": {
@@ -2262,6 +3556,10 @@ const docTemplate = `{
                 "gender": {
                     "type": "integer"
                 },
+                "group_nickname": {
+                    "description": "我在该群里的昵称（群成员/会话列表可用）",
+                    "type": "string"
+                },
                 "id": {
                     "type": "integer"
                 },
@@ -2279,6 +3577,18 @@ const docTemplate = `{
                 },
                 "phone": {
                     "type": "string"
+                },
+                "remark": {
+                    "description": "好友备注（仅在好友/私聊场景有意义）",
+                    "type": "string"
+                },
+                "room_account": {
+                    "description": "私聊房间对外号（与该好友的会话）",
+                    "type": "string"
+                },
+                "room_id": {
+                    "description": "私聊房间ID（与该好友的会话）",
+                    "type": "integer"
                 },
                 "signature": {
                     "type": "string"

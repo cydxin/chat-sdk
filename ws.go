@@ -44,31 +44,31 @@ type Client struct {
 	// UserID 和用户关联
 	UserID uint64
 
-	// Name
+	// Name Nickname Avatar
 	Name string
+
+	Nickname string
+
+	Avatar string
 }
 
 // readPump 将消息从client (websocket 连接) 到hub管理。
 func (c *Client) readPump() {
 	defer func() {
 		c.hub.unregister <- c
-		c.conn.Close()
+		_ = c.conn.Close()
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
-	c.conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.conn.SetPongHandler(func(string) error { _ = c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("error: %v", err)
+				log.Printf("readPump error: %v", err)
 			}
 			break
 		}
-		// json消息处理 todo:使用更高性能的protobuf
-		// 用回调实现
-		//  {"send_to":"房间号","send_type":"发送类型 1文字 2图片 3语音 4应用 5分享","send_content":"发送内容"}
-		// e.g {"send_to":1,"send_type":1,"send_content":"hello"}
 		c.hub.handleMessage(c, message)
 	}
 }
@@ -78,15 +78,14 @@ func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		c.conn.Close()
+		_ = c.conn.Close()
 	}()
 	for {
 		select {
 		case message, ok := <-c.send:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				// hub 已经关闭了此ws
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 
@@ -94,21 +93,22 @@ func (c *Client) writePump() {
 			if err != nil {
 				return
 			}
-			w.Write(message)
+			_, _ = w.Write(message)
 
 			// 一次性发送管道剩余全部的消息，不重新走message, ok := <-c.send，提升性能
 			// 额外的消息批量写入数据库保持结果一致
 			n := len(c.send)
 			for i := 0; i < n; i++ {
-				w.Write(<-c.send)
+				_, _ = w.Write(<-c.send)
 			}
 
 			if err := w.Close(); err != nil {
 				return
 			}
 		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				log.Printf("writePump 写入ping失败")
 				return
 			}
 		}
@@ -117,7 +117,7 @@ func (c *Client) writePump() {
 
 type WsServer struct {
 	clients map[*Client]bool
-	// userID -> all active websocket connections for that user (supports multi-device)
+	// 用户ID ->该用户所有活跃的Websocket连接（支持多设备）
 	userClients map[uint64][]*Client
 
 	broadcast  chan []byte
@@ -145,7 +145,7 @@ func (h *WsServer) Run() {
 			h.mu.Lock()
 			h.clients[client] = true
 			h.userClients[client.UserID] = append(h.userClients[client.UserID], client)
-			log.Printf("ws register user=%d totalClients=%d userKeys=%d", client.UserID, len(h.clients), len(h.userClients))
+			//log.Printf("ws register user=%d totalClients=%d userKeys=%d", client.UserID, len(h.clients), len(h.userClients))
 			h.mu.Unlock()
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -167,16 +167,50 @@ func (h *WsServer) Run() {
 			}
 			h.mu.Unlock()
 		case message := <-h.broadcast:
+			// 注意：不能在 RLock 下修改 map / close channel，否则会引发竞态/崩溃。
+			var toRemove []*Client
 			h.mu.RLock()
 			for client := range h.clients {
 				select {
 				case client.send <- message:
 				default:
-					close(client.send)
-					delete(h.clients, client)
+					toRemove = append(toRemove, client)
 				}
 			}
 			h.mu.RUnlock()
+
+			if len(toRemove) > 0 {
+				h.mu.Lock()
+				for _, client := range toRemove {
+					if _, ok := h.clients[client]; !ok {
+						continue
+					}
+					delete(h.clients, client)
+					// 从 userClients 中移除
+					if userConns, exists := h.userClients[client.UserID]; exists {
+						for i, conn := range userConns {
+							if conn == client {
+								h.userClients[client.UserID] = append(userConns[:i], userConns[i+1:]...)
+								break
+							}
+						}
+						if len(h.userClients[client.UserID]) == 0 {
+							delete(h.userClients, client.UserID)
+						}
+					}
+					// close 之前再确认一次，避免 panic（多处 close 的竞态）
+					select {
+					case <-client.send:
+						// channel 可能已被关闭并读到零值；下面安全 close 仍可能 panic，故用 recover
+					default:
+					}
+					func() {
+						defer func() { _ = recover() }()
+						close(client.send)
+					}()
+				}
+				h.mu.Unlock()
+			}
 		}
 	}
 }
@@ -191,13 +225,31 @@ func (h *WsServer) SetOnMessage(fn func(client *Client, msg []byte)) {
 }
 
 // ServeWS 处理ws的请求
-func (h *WsServer) ServeWS(w http.ResponseWriter, r *http.Request, userID uint64, name string) {
+func (h *WsServer) ServeWS(w http.ResponseWriter, r *http.Request, userID uint64, name string, extras ...string) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	client := &Client{hub: h, conn: conn, send: make(chan []byte, 256), UserID: userID, Name: name}
+
+	nickname := ""
+	avatar := ""
+	if len(extras) > 0 {
+		nickname = extras[0]
+	}
+	if len(extras) > 1 {
+		avatar = extras[1]
+	}
+
+	client := &Client{
+		hub:      h,
+		conn:     conn,
+		send:     make(chan []byte, 256),
+		UserID:   userID,
+		Name:     name,
+		Nickname: nickname,
+		Avatar:   avatar,
+	}
 	client.hub.register <- client
 	log.Println("注册进去: ", client.UserID)
 

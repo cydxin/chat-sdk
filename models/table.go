@@ -111,9 +111,16 @@ type Room struct {
 	Description string `gorm:"size:500"`               // 描述
 	MemberLimit int    `gorm:"default:200"`            // 成员上限
 	IsEncrypted bool   `gorm:"default:false"`          // 是否端到端加密
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	DeletedAt   gorm.DeletedAt `gorm:"index"`
+
+	// 新增禁言相关字段
+	IsMute             bool       `gorm:"default:false"` // 全员禁言开关
+	MuteUntil          *time.Time `gorm:"default:null"`  // 全员禁言截止时间（倒计时模式）
+	MuteDailyStartTime string     `gorm:"size:5"`        // 每日禁言开始时间 "HH:MM"
+	MuteDailyDuration  int        `gorm:"default:0"`     // 每日禁言持续时长（分钟）
+
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"index"`
 
 	// 关联关系
 	Creator   User       `gorm:"foreignKey:CreatorID"`
@@ -215,6 +222,7 @@ type Conversation struct {
 	UnreadCount   uint64  `gorm:"default:0"`                           // 未读消息数
 	IsMuted       bool    `gorm:"default:false"`                       // 是否免打扰
 	IsPinned      bool    `gorm:"default:false"`                       // 是否置顶
+	IsVisible     bool    `gorm:"default:true"`                        // 是否在消息列表展示（用户维度）
 	LastReadMsgID *uint64 `gorm:"index"`                               // 最后阅读的消息 ID
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
