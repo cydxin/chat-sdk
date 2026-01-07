@@ -99,6 +99,7 @@ func NewEngine(opts ...Option) *ChatEngine {
 			}
 
 			resp := struct {
+				Type           string    `json:"type"`
 				ID             uint64    `json:"id"`
 				RoomID         uint64    `json:"room_id"`
 				RoomType       uint8     `json:"room_type"`
@@ -109,6 +110,7 @@ func NewEngine(opts ...Option) *ChatEngine {
 				Content        string    `json:"content"`
 				CreatedAt      time.Time `json:"created_at"`
 			}{
+				Type:      "message",
 				ID:        savedMsg.ID,
 				RoomID:    room.ID,
 				RoomType:  room.Type,

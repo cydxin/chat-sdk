@@ -36,6 +36,7 @@ type MomentDTO struct {
 	ImagesCount uint8            `json:"images_count"`
 	CommentsCnt uint64           `json:"comments_cnt"`
 	Medias      []MomentMediaDTO `json:"medias"`
+	Comments    []CommentDTO     `json:"comments"`
 	CreatedAt   time.Time        `json:"created_at"`
 }
 
@@ -54,6 +55,7 @@ func toMomentDTO(m models.Moment, medias []models.MomentMedia) MomentDTO {
 	for i, mm := range medias {
 		dto.Medias[i] = MomentMediaDTO{Type: mm.Type, URL: mm.URL, Sort: mm.SortOrder}
 	}
+	dto.Comments = []CommentDTO{}
 	return dto
 }
 
@@ -166,10 +168,41 @@ func (s *MomentService) ListFriendMoments(userID uint64, limit, offset int) ([]M
 		mediaMap[mm.MomentID] = append(mediaMap[mm.MomentID], mm)
 	}
 
+	// 额外：批量拉取评论（每条动态最多带最近 N 条）
+	const maxCommentsPerMoment = 20
+	var comments []models.MomentComment
+	if err := s.DB.Where("moment_id IN ?", momentIDs).
+		Order("created_at DESC").
+		Find(&comments).Error; err != nil {
+		return nil, err
+	}
+	commentMap := make(map[uint64][]CommentDTO)
+	for _, c := range comments {
+		list := commentMap[c.MomentID]
+		if len(list) >= maxCommentsPerMoment {
+			continue
+		}
+		list = append(list, CommentDTO{ID: c.ID, MomentID: c.MomentID, UserID: c.UserID, ParentID: c.ParentID, Content: c.Content, CreatedAt: c.CreatedAt})
+		commentMap[c.MomentID] = list
+	}
+	// 注意：上面是 DESC（最新在前），前端一般需要 ASC（最旧在前）更好渲染，这里给它翻转
+	for mid := range commentMap {
+		cs := commentMap[mid]
+		for i, j := 0, len(cs)-1; i < j; i, j = i+1, j-1 {
+			cs[i], cs[j] = cs[j], cs[i]
+		}
+		commentMap[mid] = cs
+	}
+
 	// 拼装 DTO
 	dtos := make([]MomentDTO, len(moments))
 	for i, m := range moments {
-		dtos[i] = toMomentDTO(m, mediaMap[m.ID])
+		dto := toMomentDTO(m, mediaMap[m.ID])
+		dto.Comments = commentMap[m.ID]
+		if dto.Comments == nil {
+			dto.Comments = []CommentDTO{}
+		}
+		dtos[i] = dto
 	}
 	return dtos, nil
 }
