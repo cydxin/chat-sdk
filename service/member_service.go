@@ -66,7 +66,7 @@ func (s *MemberService) SendFriendRequest(fromUser, toUser uint64, message strin
 	// 通知对方
 	if s.WsNotifier != nil {
 		notification := map[string]interface{}{
-			"type":       "friend_request",
+			"type":       EventFriendRequest,
 			"request_id": request.ID,
 			"from_user":  fromUser,
 			"message":    message,
@@ -223,7 +223,7 @@ func (s *MemberService) AcceptFriendRequest(requestID uint64, userID uint64) err
 	// 通知申请者
 	if s.WsNotifier != nil {
 		notification := map[string]interface{}{
-			"type":       "friend_accepted",
+			"type":       EventFriendAccepted,
 			"request_id": requestID,
 			"user_id":    userID,
 		}
@@ -282,7 +282,7 @@ func (s *MemberService) RejectFriendRequest(requestID uint64, userID uint64) err
 	// 通知申请者
 	if s.WsNotifier != nil {
 		notification := map[string]interface{}{
-			"type":       "friend_rejected",
+			"type":       EventFriendRejected,
 			"request_id": requestID,
 			"user_id":    userID,
 		}
@@ -329,7 +329,7 @@ func (s *MemberService) DeleteFriend(user1, user2 uint64) error {
 	// 通知对方
 	if s.WsNotifier != nil {
 		notification := map[string]interface{}{
-			"type":    "friend_deleted",
+			"type":    EventFriendDeleted,
 			"user_id": user1,
 			"room_id": room.ID,
 		}
@@ -577,6 +577,7 @@ func (s *MemberService) AddRoomMember(roomID uint64, userIDs []uint64, operatorI
 	}
 
 	toAdd := make([]uint64, 0, len(clean))
+	toAddUserInfo := make([]map[string]interface{}, 0, len(clean))
 	for _, uid := range clean {
 		if _, ok := existingSet[uid]; ok {
 			continue
@@ -589,7 +590,29 @@ func (s *MemberService) AddRoomMember(roomID uint64, userIDs []uint64, operatorI
 
 	now := time.Now()
 	rows := make([]models.RoomUser, 0, len(toAdd))
+
+	// 批量获取用户头像/昵称（优先在线缓存，未命中再查库）
+	briefMap, err := models.NewUserDAO(s.DB).BatchGetUserBriefsPreferOnline(toAdd, func(userID uint64) (models.UserBrief, bool, error) {
+		if s.OnlineUserGetter == nil {
+			return models.UserBrief{}, false, nil
+		}
+		nn, av, ok := s.OnlineUserGetter(userID)
+		if !ok {
+			return models.UserBrief{}, false, nil
+		}
+		return models.UserBrief{UserID: userID, Nickname: nn, Avatar: av}, true, nil
+	})
+	if err != nil {
+		return err
+	}
+
 	for _, uid := range toAdd {
+		b := briefMap[uid]
+		toAddUserInfo = append(toAddUserInfo, map[string]interface{}{
+			"user_id":  uid,
+			"nickname": b.Nickname,
+			"avatar":   b.Avatar,
+		})
 		rows = append(rows, models.RoomUser{
 			RoomID:    roomID,
 			UserID:    uid,
@@ -605,26 +628,18 @@ func (s *MemberService) AddRoomMember(roomID uint64, userIDs []uint64, operatorI
 		return err
 	}
 
-	// 通知被添加的用户和房间其他成员
-	if s.WsNotifier != nil {
-		// 获取所有房间成员（包含新成员）
+	// 通知（尽力而为：落库 + WS）
+	if s.Notify != nil {
 		var members []uint64
-		_ = s.DB.Model(&models.RoomUser{}).
-			Where("room_id = ?", roomID).
-			Pluck("user_id", &members).Error
-
-		for _, addedID := range toAdd {
-			notification := map[string]interface{}{
-				"type":        "member_added",
-				"room_id":     roomID,
-				"user_id":     addedID,
-				"operator_id": operatorID,
-			}
-			notifBytes, _ := json.Marshal(notification)
-			for _, memberID := range members {
-				s.WsNotifier(memberID, notifBytes)
-			}
-		}
+		_ = s.DB.Model(&models.RoomUser{}).Where("room_id = ?", roomID).Pluck("user_id", &members).Error
+		_, _ = s.Notify.PublishRoomEvent(
+			roomID,
+			operatorID,
+			EventRoomMemberAdded,
+			map[string]any{"user_ids": toAddUserInfo},
+			members,
+			true,
+		)
 	}
 
 	return nil
@@ -653,12 +668,15 @@ func (s *MemberService) RemoveRoomMember(roomID uint64, userID uint64, operatorI
 		return fmt.Errorf("只有管理员可以移除成员")
 	}
 
-	// 删除成员
-	err = tx.Where("room_id = ? AND user_id = ?", roomID, userID).
-		Delete(&models.RoomUser{}).Error
-
-	if err != nil {
-		return err
+	// 删除成员（幂等：如果目标已不在群里，RowsAffected=0 直接返回 nil，不再重复通知）
+	res := tx.Where("room_id = ? AND user_id = ?", roomID, userID).
+		Delete(&models.RoomUser{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		// 目标用户已不在群里（可能已被踢/已退出）
+		return nil
 	}
 
 	// 隐藏该成员的会话（从消息列表不展示）
@@ -670,28 +688,18 @@ func (s *MemberService) RemoveRoomMember(roomID uint64, userID uint64, operatorI
 		return err
 	}
 
-	// 通知被移除的用户和房间其他成员
-	if s.WsNotifier != nil {
-		notification := map[string]interface{}{
-			"type":        "member_removed",
-			"room_id":     roomID,
-			"user_id":     userID,
-			"operator_id": operatorID,
-		}
-		notifBytes, _ := json.Marshal(notification)
-
-		// 通知被移除的用户
-		s.WsNotifier(userID, notifBytes)
-
-		// 获取所有房间成员
+	// 通知（尽力而为：落库 + WS）
+	if s.Notify != nil {
 		var members []uint64
-		s.DB.Model(&models.RoomUser{}).
-			Where("room_id = ?", roomID).
-			Pluck("user_id", &members)
-
-		for _, memberID := range members {
-			s.WsNotifier(memberID, notifBytes)
-		}
+		_ = s.DB.Model(&models.RoomUser{}).Where("room_id = ?", roomID).Pluck("user_id", &members).Error
+		_, _ = s.Notify.PublishRoomEvent(
+			roomID,
+			operatorID,
+			EventRoomMemberRemoved,
+			map[string]any{"user_id": userID},
+			members,
+			true,
+		)
 	}
 
 	return nil

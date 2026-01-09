@@ -194,3 +194,81 @@ func (dao *UserDAO) ExistsByAccount(username, phone, email string) (bool, error)
 	}
 	return false, nil
 }
+
+// UserBrief 用于返回给业务层的用户展示信息
+type UserBrief struct {
+	UserID   uint64 `json:"user_id"`
+	Nickname string `json:"nickname"`
+	Avatar   string `json:"avatar"`
+}
+
+// OnlineUserBriefGetter 用于从内存/WS 在线列表中读取用户信息。
+// 返回值：
+//   - brief: 如果 ok=true 则代表命中在线缓存
+//   - ok: 是否命中
+//   - err: 获取过程错误（一般应返回 nil）
+type OnlineUserBriefGetter func(userID uint64) (brief UserBrief, ok bool, err error)
+
+// BatchGetUserBriefsPreferOnline 批量获取用户展示信息：优先在线缓存，未命中再批量查库。
+// 返回 map[userID]UserBrief（只保证包含传入 ids 中的项；缺失则给空 nickname/avatar）。
+func (dao *UserDAO) BatchGetUserBriefsPreferOnline(ids []uint64, onlineGetter OnlineUserBriefGetter) (map[uint64]UserBrief, error) {
+	out := make(map[uint64]UserBrief, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+
+	// 1) 先走在线缓存
+	miss := make([]uint64, 0, len(ids))
+	seen := make(map[uint64]struct{}, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+
+		if onlineGetter != nil {
+			b, ok, err := onlineGetter(id)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				out[id] = b
+				continue
+			}
+		}
+		miss = append(miss, id)
+	}
+
+	if len(miss) == 0 {
+		return out, nil
+	}
+
+	// 2) 批量查库（只取必要字段）
+	type row struct {
+		ID       uint64
+		Nickname string
+		Avatar   string
+	}
+	var rows []row
+	if err := dao.db.Model(&User{}).
+		Select("id, nickname, avatar").
+		Where("id IN ?", miss).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		out[r.ID] = UserBrief{UserID: r.ID, Nickname: r.Nickname, Avatar: r.Avatar}
+	}
+
+	// 3) 保证所有 miss 都有默认值
+	for _, id := range miss {
+		if _, ok := out[id]; !ok {
+			out[id] = UserBrief{UserID: id, Nickname: "", Avatar: ""}
+		}
+	}
+
+	return out, nil
+}

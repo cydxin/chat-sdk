@@ -149,7 +149,7 @@ func (s *RoomService) GetGroupInfo(roomID uint64) (*GroupInfoDTO, error) {
 		return nil, err
 	}
 	if room.Type != 2 {
-		return nil, fmt.Errorf("not a group room")
+		return nil, fmt.Errorf("此群不存在")
 	}
 	return &GroupInfoDTO{
 		ID:          room.ID,
@@ -160,6 +160,32 @@ func (s *RoomService) GetGroupInfo(roomID uint64) (*GroupInfoDTO, error) {
 		CreatedAt:   room.CreatedAt,
 		UpdatedAt:   room.UpdatedAt,
 	}, nil
+}
+
+// QuitGroup 退出群聊
+func (s *RoomService) QuitGroup(roomID, UID uint64) error {
+	// 通知（尽力而为：落库 + WS）
+	err := s.DB.Delete(&models.RoomUser{}, "room_id = ? and user_id =? ", roomID, UID).Error
+	if err != nil {
+		return err
+	}
+	// 会话也隐藏掉
+	s.DB.Model(&models.Conversation{}).Where("room_id = ? and user_id = ?", roomID, UID).Update("is_visible", false)
+
+	if s.Notify != nil {
+		var members []uint64
+		_ = s.DB.Model(&models.RoomUser{}).Where("room_id = ?", roomID).Pluck("user_id", &members).Error
+		_, _ = s.Notify.PublishRoomEvent(
+			roomID,
+			UID,
+			EventRoomMemberQuit,
+			map[string]any{"user_id": UID},
+			members,
+			true,
+		)
+	}
+
+	return nil
 }
 
 // GetUserRooms 获取用户参与的所有房间
@@ -365,7 +391,22 @@ func (s *RoomService) UpdateGroupInfo(operatorID, roomID uint64, name, avatar st
 		updates["avatar"] = avatar
 	}
 
-	return s.DB.Model(&models.Room{}).Where("id = ?", roomID).Updates(updates).Error
+	if err := s.DB.Model(&models.Room{}).Where("id = ?", roomID).Updates(updates).Error; err != nil {
+		return err
+	}
+	// 发布通知（尽力而为）
+	if s.Notify != nil {
+		members, _ := s.GetRoomMembers(roomID)
+		_, _ = s.Notify.PublishRoomEvent(
+			roomID,
+			operatorID,
+			EventRoomGroupInfoUpdated,
+			map[string]any{"name": name, "avatar": avatar},
+			members,
+			true,
+		)
+	}
+	return nil
 }
 
 // SetGroupAdmin 设置/取消管理员
@@ -384,9 +425,24 @@ func (s *RoomService) SetGroupAdmin(operatorID, roomID, targetUserID uint64, isA
 		newRole = 1
 	}
 
-	return s.DB.Model(&models.RoomUser{}).
+	if err := s.DB.Model(&models.RoomUser{}).
 		Where("room_id = ? AND user_id = ?", roomID, targetUserID).
-		Update("role", newRole).Error
+		Update("role", newRole).Error; err != nil {
+		return err
+	}
+
+	if s.Notify != nil {
+		members, _ := s.GetRoomMembers(roomID)
+		_, _ = s.Notify.PublishRoomEvent(
+			roomID,
+			operatorID,
+			EventRoomAdminSet,
+			map[string]any{"target_user_id": targetUserID, "is_admin": isAdmin, "role": newRole},
+			members,
+			true,
+		)
+	}
+	return nil
 }
 
 // SetGroupMuteCountdown 设置群禁言（倒计时）
@@ -411,7 +467,21 @@ func (s *RoomService) SetGroupMuteCountdown(operatorID, roomID uint64, durationM
 		updates["mute_until"] = &t
 	}
 
-	return s.DB.Model(&models.Room{}).Where("id = ?", roomID).Updates(updates).Error
+	if err := s.DB.Model(&models.Room{}).Where("id = ?", roomID).Updates(updates).Error; err != nil {
+		return err
+	}
+	if s.Notify != nil {
+		members, _ := s.GetRoomMembers(roomID)
+		_, _ = s.Notify.PublishRoomEvent(
+			roomID,
+			operatorID,
+			EventRoomGroupMuteCountdown,
+			map[string]any{"duration_minutes": durationMinutes},
+			members,
+			true,
+		)
+	}
+	return nil
 }
 
 // SetGroupMuteScheduled 设置群禁言（定时）
@@ -430,7 +500,21 @@ func (s *RoomService) SetGroupMuteScheduled(operatorID, roomID uint64, startTime
 		"mute_daily_duration":   durationMinutes,
 	}
 
-	return s.DB.Model(&models.Room{}).Where("id = ?", roomID).Updates(updates).Error
+	if err := s.DB.Model(&models.Room{}).Where("id = ?", roomID).Updates(updates).Error; err != nil {
+		return err
+	}
+	if s.Notify != nil {
+		members, _ := s.GetRoomMembers(roomID)
+		_, _ = s.Notify.PublishRoomEvent(
+			roomID,
+			operatorID,
+			EventRoomGroupMuteScheduled,
+			map[string]any{"start_time": startTime, "duration_minutes": durationMinutes},
+			members,
+			true,
+		)
+	}
+	return nil
 }
 
 // SetUserMute 设置指定用户禁言
@@ -461,9 +545,24 @@ func (s *RoomService) SetUserMute(operatorID, roomID, targetUserID uint64, durat
 		updates["muted_until"] = &t
 	}
 
-	return s.DB.Model(&models.RoomUser{}).
+	if err := s.DB.Model(&models.RoomUser{}).
 		Where("room_id = ? AND user_id = ?", roomID, targetUserID).
-		Updates(updates).Error
+		Updates(updates).Error; err != nil {
+		return err
+	}
+
+	if s.Notify != nil {
+		members, _ := s.GetRoomMembers(roomID)
+		_, _ = s.Notify.PublishRoomEvent(
+			roomID,
+			operatorID,
+			EventRoomUserMute,
+			map[string]any{"target_user_id": targetUserID, "duration_minutes": durationMinutes},
+			members,
+			true,
+		)
+	}
+	return nil
 }
 
 // -------------------- 群成员列表（Member List） --------------------
@@ -481,7 +580,7 @@ func (s *RoomService) SetMyGroupNickname(userID, roomID uint64, nickname string)
 		return err
 	}
 	if count == 0 {
-		return fmt.Errorf("not a room member")
+		return fmt.Errorf("非群成员")
 	}
 
 	return s.DB.Model(&models.RoomUser{}).

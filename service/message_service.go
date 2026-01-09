@@ -102,15 +102,17 @@ func toMessageListItemDTO(m *models.Message) *MessageListItemDTO {
 	}
 }
 
-func ToMessageDTOs(msgs []models.Message) []MessageDTO {
-	dtos := make([]MessageDTO, len(msgs))
-	for i, msg := range msgs {
-		if dto := ToMessageDTO(&msg); dto != nil {
-			dtos[i] = *dto
-		}
-	}
-	return dtos
-}
+// ToMessageDTOs 已弃用：当前仓库内无引用。
+// 如需批量转换可直接用 ToMessageDTO + 循环。
+// func ToMessageDTOs(msgs []models.Message) []MessageDTO {
+// 	dtos := make([]MessageDTO, len(msgs))
+// 	for i, msg := range msgs {
+// 		if dto := ToMessageDTO(&msg); dto != nil {
+// 			dtos[i] = *dto
+// 		}
+// 	}
+// 	return dtos
+// }
 
 func toMessageListItemDTOs(msgs []models.Message) []MessageListItemDTO {
 	out := make([]MessageListItemDTO, 0, len(msgs))
@@ -125,16 +127,17 @@ func toMessageListItemDTOs(msgs []models.Message) []MessageListItemDTO {
 type MessageService struct {
 	*Service
 	messageDAO *models.MessageDAO
+	// SessionBootstrap 用于 WS 建连时加载会话已读游标（由 engine 注入）
+	SessionBootstrap *SessionBootstrapService
 }
 
 func NewMessageService(s *Service) *MessageService {
 	log.Println("NewMessageService")
-	return &MessageService{Service: s, messageDAO: models.NewMessageDAO(s.DB)}
+	return &MessageService{Service: s, messageDAO: models.NewMessageDAO(s.DB), SessionBootstrap: s.SessionBootstrap}
 }
 
 // SaveMessage 保存消息到数据库
 func (s *MessageService) SaveMessage(roomID uint64, senderID uint64, content string, msgType uint8) (*models.Message, error) {
-	// 1. Check Mute Status
 	if err := s.checkMuteStatus(roomID, senderID); err != nil {
 		return nil, err
 	}
@@ -151,28 +154,9 @@ func (s *MessageService) SaveMessage(roomID uint64, senderID uint64, content str
 	if err != nil {
 		return nil, err
 	}
-
-	// 2. 发送消息后：把该房间的会话默认展示出来（对每个成员按用户维度设置）
-	var memberIDs []uint64
-	_ = s.DB.Model(&models.RoomUser{}).
-		Where("room_id = ?", roomID).
-		Pluck("user_id", &memberIDs).Error
-
-	if len(memberIDs) > 0 {
-		now := time.Now()
-		for _, uid := range memberIDs {
-			// Upsert conversation
-			conv := &models.Conversation{UserID: uid, RoomID: roomID}
-			_ = s.DB.FirstOrCreate(conv, map[string]any{"user_id": uid, "room_id": roomID}).Error
-			_ = s.DB.Model(&models.Conversation{}).
-				Where("user_id = ? AND room_id = ?", uid, roomID).
-				Updates(map[string]any{
-					"is_visible":      true,
-					"last_message_id": msg.ID,
-					"updated_at":      now,
-				}).Error
-		}
-	}
+	log.Println(msg.ID, " 最后的消息 ID")
+	s.DB.Model(&models.Room{}).Where("id = ?", roomID).UpdateColumn("last_message_id", msg.ID)
+	//now := time.Now()
 
 	return msg, nil
 }
@@ -197,12 +181,12 @@ func (s *MessageService) checkMuteStatus(roomID, userID uint64) error {
 
 	// 1. Check User Mute
 	if member.IsMuted && member.MutedUntil != nil && member.MutedUntil.After(now) {
-		return fmt.Errorf("you are muted until %s", member.MutedUntil.Format("2006-01-02 15:04:05"))
+		return fmt.Errorf("你已经被禁至 %s", member.MutedUntil.Format("2006-01-02 15:04:05"))
 	}
 
 	// 2. Check Global Mute (Countdown)
 	if room.IsMute && room.MuteUntil != nil && room.MuteUntil.After(now) {
-		return fmt.Errorf("group is muted until %s", room.MuteUntil.Format("2006-01-02 15:04:05"))
+		return fmt.Errorf("群开启禁言至 %s", room.MuteUntil.Format("2006-01-02 15:04:05"))
 	}
 
 	// 3. Check Global Mute (Scheduled)
@@ -215,13 +199,13 @@ func (s *MessageService) checkMuteStatus(roomID, userID uint64) error {
 			endToday := startToday.Add(time.Duration(room.MuteDailyDuration) * time.Minute)
 
 			if now.After(startToday) && now.Before(endToday) {
-				return fmt.Errorf("group is muted daily from %s for %d minutes", room.MuteDailyStartTime, room.MuteDailyDuration)
+				return fmt.Errorf("群每日禁言 %s 禁言 %d分钟", room.MuteDailyStartTime, room.MuteDailyDuration)
 			}
 
 			startYesterday := startToday.Add(-24 * time.Hour)
 			endYesterday := startYesterday.Add(time.Duration(room.MuteDailyDuration) * time.Minute)
 			if now.After(startYesterday) && now.Before(endYesterday) {
-				return fmt.Errorf("group is muted daily from %s for %d minutes", room.MuteDailyStartTime, room.MuteDailyDuration)
+				return fmt.Errorf("群每日禁言 %s 禁言 %d分钟", room.MuteDailyStartTime, room.MuteDailyDuration)
 			}
 		}
 	}
@@ -288,10 +272,11 @@ func (s *MessageService) RecallMessage(messageID, userID uint64, recallType uint
 
 		// 构造通知消息
 		notification := map[string]interface{}{
-			"type":       recallType,
-			"message_id": messageID,
-			"room_id":    msg.RoomID,
-			"user_id":    userID,
+			"type":        EventRecall,
+			"recall_type": recallType,
+			"message_id":  messageID,
+			"room_id":     msg.RoomID,
+			"user_id":     userID,
 		}
 		notifBytes, _ := json.Marshal(notification)
 
@@ -311,15 +296,15 @@ func (s *MessageService) GetRoomMessages(roomID uint64, limit, offset int) ([]mo
 }
 
 // GetRoomMessagesDTO 获取房间消息列表（分页，带发送人信息，返回 DTO）
-func (s *MessageService) GetRoomMessagesDTO(roomID uint64, limit, messId int) ([]MessageListItemDTO, error) {
+func (s *MessageService) GetRoomMessagesDTO(roomID uint64, limit, messID int) ([]MessageListItemDTO, error) {
 	var msgs []models.Message
 	// 这里不走 DAO：需要 preload sender
 	//err
 	query := s.DB.Model(&models.Message{}).
 		Preload("Sender").
 		Where("room_id = ?", roomID)
-	if messId > 0 {
-		query = query.Where("id < ?", messId)
+	if messID > 0 {
+		query = query.Where("id < ?", messID)
 	}
 	err := query.Order("created_at DESC").
 		Limit(limit).

@@ -137,7 +137,7 @@ func (s *VerifyCodeService) VerifyCode(ctx context.Context, purpose VerifyCodePu
 		return false, fmt.Errorf("purpose is required")
 	}
 	if code == "" {
-		return false, fmt.Errorf("code is required")
+		return false, fmt.Errorf("输入验证码")
 	}
 
 	key := s.codeKey(purpose, identifier)

@@ -47,6 +47,15 @@ definitions:
     - items
     - to_room_ids
     type: object
+  chat_sdk.MarkNotificationsReadReq:
+    properties:
+      ids:
+        items:
+          type: integer
+        type: array
+    required:
+    - ids
+    type: object
   chat_sdk.RoomMemberReq:
     properties:
       room_id:
@@ -294,6 +303,9 @@ definitions:
       isSystem:
         description: 是否为系统消息
         type: boolean
+      messageUUID:
+        description: 对外消息 ID
+        type: string
       replyTo:
         $ref: '#/definitions/models.Message'
       replyToMsgID:
@@ -304,8 +316,7 @@ definitions:
         - $ref: '#/definitions/models.Room'
         description: 关联关系
       roomID:
-        description: MessageID    string  `gorm:"size:36;uniqueIndex;not null"` //
-          对外消息 ID
+        description: 房间 ID (对应 Room.ID)
         type: integer
       sender:
         $ref: '#/definitions/models.User'
@@ -681,6 +692,10 @@ definitions:
     type: object
   service.MomentDTO:
     properties:
+      comments:
+        items:
+          $ref: '#/definitions/service.CommentDTO'
+        type: array
       comments_cnt:
         type: integer
       created_at:
@@ -1550,6 +1565,74 @@ paths:
       summary: 朋友圈动态列表
       tags:
       - 朋友圈
+  /notification/list:
+    get:
+      consumes:
+      - application/json
+      parameters:
+      - description: 近 N 天(默认2)
+        in: query
+        name: days
+        type: integer
+      - description: 游标(上一页最小id)
+        format: int64
+        in: query
+        name: cursor
+        type: integer
+      - description: 条数(默认50,最大200)
+        in: query
+        name: limit
+        type: integer
+      - description: 按房间过滤
+        format: int64
+        in: query
+        name: room_id
+        type: integer
+      - description: 只看未读
+        in: query
+        name: unread_only
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: data.items + data.next_cursor
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  additionalProperties: true
+                  type: object
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 拉取通知
+      tags:
+      - 通知
+  /notification/read:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/chat_sdk.MarkNotificationsReadReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 标记通知已读
+      tags:
+      - 通知
   /room/admin/set:
     post:
       consumes:
@@ -1677,6 +1760,37 @@ paths:
       security:
       - BearerAuth: []
       summary: 获取用户群聊列表
+      tags:
+      - 房间
+  /room/group/quit:
+    get:
+      consumes:
+      - application/json
+      parameters:
+      - description: 群ID(房间ID)
+        format: int64
+        in: query
+        name: room_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 群信息
+          schema:
+            $ref: '#/definitions/response.Response'
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 退出指定群聊
       tags:
       - 房间
   /room/group/update:

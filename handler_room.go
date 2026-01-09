@@ -542,3 +542,32 @@ func (c *ChatEngine) GinHandleGetGroupInfo(ctx *gin.Context) {
 	}
 	ctx.JSON(http.StatusOK, response.Success(info))
 }
+
+// GinHandleQuitGroup  退出群聊
+// @Summary 退出指定群聊
+// @Description
+// @Tags 房间
+// @Accept json
+// @Produce json
+// @Param room_id query uint64 true "群ID(房间ID)"
+// @Success 200 {object} response.Response "群信息"
+// @Failure 400 {object} response.Response "参数错误"
+// @Failure 500 {object} response.Response "服务器错误"
+// @Security BearerAuth
+// @Router /room/group/quit [get]
+func (c *ChatEngine) GinHandleQuitGroup(ctx *gin.Context) {
+	ridStr := ctx.Query("room_id")
+	rid, err := strconv.ParseUint(ridStr, 10, 64)
+	if err != nil || rid == 0 {
+		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, "invalid room_id"))
+		return
+	}
+	uidStr, _ := ctx.Get("user_id")
+	uid := uidStr.(uint64)
+	err = c.RoomService.QuitGroup(rid, uid)
+	if err != nil {
+		ctx.JSON(http.StatusOK, response.Error(response.CodeInternalError, err.Error()))
+		return
+	}
+	ctx.JSON(http.StatusOK, response.Success(nil))
+}

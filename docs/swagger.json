@@ -1094,6 +1094,118 @@
                 }
             }
         },
+        "/notification/list": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "通知"
+                ],
+                "summary": "拉取通知",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "近 N 天(默认2)",
+                        "name": "days",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "游标(上一页最小id)",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "条数(默认50,最大200)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "按房间过滤",
+                        "name": "room_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "只看未读",
+                        "name": "unread_only",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data.items + data.next_cursor",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/notification/read": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "通知"
+                ],
+                "summary": "标记通知已读",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.MarkNotificationsReadReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/room/admin/set": {
             "post": {
                 "security": [
@@ -1295,6 +1407,55 @@
                                     }
                                 }
                             ]
+                        }
+                    },
+                    "400": {
+                        "description": "参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/room/group/quit": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "房间"
+                ],
+                "summary": "退出指定群聊",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "群ID(房间ID)",
+                        "name": "room_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "群信息",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
                         }
                     },
                     "400": {
@@ -2416,6 +2577,20 @@
                 }
             }
         },
+        "chat_sdk.MarkNotificationsReadReq": {
+            "type": "object",
+            "required": [
+                "ids"
+            ],
+            "properties": {
+                "ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
         "chat_sdk.RoomMemberReq": {
             "type": "object",
             "required": [
@@ -2776,6 +2951,10 @@
                     "description": "是否为系统消息",
                     "type": "boolean"
                 },
+                "messageUUID": {
+                    "description": "对外消息 ID",
+                    "type": "string"
+                },
                 "replyTo": {
                     "$ref": "#/definitions/models.Message"
                 },
@@ -2792,7 +2971,7 @@
                     ]
                 },
                 "roomID": {
-                    "description": "MessageID    string  `gorm:\"size:36;uniqueIndex;not null\"` // 对外消息 ID",
+                    "description": "房间 ID (对应 Room.ID)",
                     "type": "integer"
                 },
                 "sender": {
@@ -3338,6 +3517,12 @@
         "service.MomentDTO": {
             "type": "object",
             "properties": {
+                "comments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.CommentDTO"
+                    }
+                },
                 "comments_cnt": {
                     "type": "integer"
                 },

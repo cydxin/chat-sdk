@@ -47,8 +47,11 @@ func (s *ConversationService) GetConversationList(userID uint64) ([]Conversation
 
 	// 全部 房间ID
 	roomIDs := make([]uint64, 0, len(convs))
+	// convMap: roomID -> conv
+	convMap := make(map[uint64]models.Conversation, len(convs))
 	for _, c := range convs {
 		roomIDs = append(roomIDs, c.RoomID)
+		convMap[c.RoomID] = c
 	}
 
 	// rooms
@@ -60,10 +63,114 @@ func (s *ConversationService) GetConversationList(userID uint64) ([]Conversation
 	}
 	roomMap := make(map[uint64]models.Room, len(rooms))
 	privateRoomIDs := make([]uint64, 0)
+	// 用于批量查询 last message
+	lastMsgIDs := make([]uint64, 0, len(rooms))
+	seenMsg := make(map[uint64]struct{}, len(rooms))
 	for _, r := range rooms {
 		roomMap[r.ID] = r
 		if r.Type == 1 {
 			privateRoomIDs = append(privateRoomIDs, r.ID)
+		}
+		if r.LastMessageID != nil && *r.LastMessageID > 0 {
+			mid := *r.LastMessageID
+			if _, ok := seenMsg[mid]; !ok {
+				seenMsg[mid] = struct{}{}
+				lastMsgIDs = append(lastMsgIDs, mid)
+			}
+		}
+	}
+
+	// 批量查询最后一条消息（含 sender）
+	lastMsgMap := make(map[uint64]*MessageDTO, len(lastMsgIDs)) // key: room_id
+	if len(lastMsgIDs) > 0 {
+		var msgs []models.Message
+		if err := s.DB.Model(&models.Message{}).
+			Preload("Sender").
+			Where("id IN ?", lastMsgIDs).
+			Find(&msgs).Error; err != nil {
+			return nil, err
+		}
+		msgByID := make(map[uint64]models.Message, len(msgs))
+		for i := range msgs {
+			msgByID[msgs[i].ID] = msgs[i]
+		}
+		for _, r := range rooms {
+			if r.LastMessageID == nil || *r.LastMessageID == 0 {
+				continue
+			}
+			m, ok := msgByID[*r.LastMessageID]
+			if !ok {
+				continue
+			}
+			lastMsgMap[r.ID] = ToMessageDTO(&m)
+		}
+	}
+
+	// 预计算未读数：roomID -> unread
+	// 说明：避免逐 room COUNT 的 N+1 查询，改为一次聚合查询批量统计。
+	// 未读定义：在 (lastRead, lastMsgID] 区间内的消息条数。
+	unreadMap := make(map[uint64]uint64, len(roomIDs))
+	// 先准备需要统计的区间条件
+	type rng struct {
+		roomID    uint64
+		lastRead  uint64
+		lastMsgID uint64
+	}
+	ranges := make([]rng, 0, len(roomIDs))
+	for _, rid := range roomIDs {
+		r, ok := roomMap[rid]
+		if !ok {
+			unreadMap[rid] = 0
+			continue
+		}
+		c := convMap[rid]
+		if r.LastMessageID == nil || *r.LastMessageID == 0 {
+			unreadMap[rid] = 0
+			continue
+		}
+		lastMsgID := *r.LastMessageID
+		var lastRead uint64
+		if c.LastReadMsgID != nil {
+			lastRead = *c.LastReadMsgID
+		}
+		if lastRead >= lastMsgID {
+			unreadMap[rid] = 0
+			continue
+		}
+		ranges = append(ranges, rng{roomID: rid, lastRead: lastRead, lastMsgID: lastMsgID})
+		// 默认 0，后续查询有结果再覆盖
+		unreadMap[rid] = 0
+	}
+
+	if len(ranges) > 0 {
+		// 组装 OR 条件： (room_id=? AND id>? AND id<=?) OR ...
+		q := s.DB.Model(&models.Message{}).
+			Select("room_id, COUNT(1) AS cnt")
+		for i, rg := range ranges {
+			cond := "room_id = ? AND id > ? AND id <= ?"
+			args := []any{rg.roomID, rg.lastRead, rg.lastMsgID}
+			if i == 0 {
+				q = q.Where(cond, args...)
+			} else {
+				q = q.Or(cond, args...)
+			}
+		}
+		q = q.Group("room_id")
+
+		type row struct {
+			RoomID uint64
+			Cnt    int64
+		}
+		var rows []row
+		if err := q.Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			if r.Cnt < 0 {
+				unreadMap[r.RoomID] = 0
+				continue
+			}
+			unreadMap[r.RoomID] = uint64(r.Cnt)
 		}
 	}
 
@@ -108,27 +215,6 @@ func (s *ConversationService) GetConversationList(userID uint64) ([]Conversation
 		}
 	}
 
-	// 最后一条消息
-	lastMsgIDs := make([]uint64, 0)
-	for _, c := range convs {
-		if c.LastMessageID != nil && *c.LastMessageID > 0 {
-			lastMsgIDs = append(lastMsgIDs, *c.LastMessageID)
-		}
-	}
-
-	lastMsgMap := make(map[uint64]*models.Message)
-	if len(lastMsgIDs) > 0 {
-		var msgs []models.Message
-		if err := s.DB.Model(&models.Message{}).
-			Where("id IN ?", lastMsgIDs).
-			Find(&msgs).Error; err == nil {
-			for i := range msgs {
-				m := msgs[i]
-				lastMsgMap[m.ID] = &m
-			}
-		}
-	}
-
 	// 用户的群昵称
 	groupNicknameMap := make(map[uint64]string)
 	{
@@ -159,8 +245,9 @@ func (s *ConversationService) GetConversationList(userID uint64) ([]Conversation
 			UserID:      0,
 			RoomAccount: r.RoomAccount,
 			RoomType:    r.Type,
-			UnreadCount: c.UnreadCount,
+			UnreadCount: unreadMap[r.ID],
 			UpdatedAt:   c.UpdatedAt.Unix(),
+			LastMessage: lastMsgMap[r.ID],
 		}
 
 		switch r.Type {
@@ -194,12 +281,6 @@ func (s *ConversationService) GetConversationList(userID uint64) ([]Conversation
 			item.Name = fmt.Sprintf("room_%d", r.ID)
 		}
 
-		if c.LastMessageID != nil {
-			if msg, ok := lastMsgMap[*c.LastMessageID]; ok {
-				item.LastMessage = ToMessageDTO(msg)
-			}
-		}
-
 		out = append(out, item)
 	}
 
@@ -215,6 +296,13 @@ func (s *ConversationService) EnsureConversationForRoom(userID, roomID uint64) e
 	// 确保可见：如果用户曾经隐藏过会话，新消息应该自动让它重新出现在列表里
 	return s.DB.Model(&models.Conversation{}).
 		Where("user_id = ? AND room_id = ?", userID, roomID).
+		Updates(map[string]any{"is_visible": true}).Error
+}
+
+// SetConversationVisible 设置会话可见
+func (s *ConversationService) SetConversationVisible(roomID uint64) error {
+	return s.DB.Model(&models.Conversation{}).
+		Where("is_visible = 0 AND room_id = ?", roomID).
 		Updates(map[string]any{"is_visible": true}).Error
 }
 

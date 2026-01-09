@@ -95,7 +95,7 @@ func (c *ChatEngine) GinHandleUserRegister(ctx *gin.Context) {
 	}
 
 	if c.config == nil || c.config.RDB == nil {
-		ctx.JSON(http.StatusOK, response.Error(response.CodeRedisNotConfigured, "redis is not configured"))
+		ctx.JSON(http.StatusOK, response.Error(response.CodeRedisNotConfigured, "r 服务暂未开启"))
 		return
 	}
 
@@ -175,7 +175,7 @@ func (c *ChatEngine) GinHandleSendVerifyCode(ctx *gin.Context) {
 		return
 	}
 	if c.config == nil || c.config.RDB == nil {
-		ctx.JSON(http.StatusOK, response.Error(response.CodeRedisNotConfigured, "redis is not configured"))
+		ctx.JSON(http.StatusOK, response.Error(response.CodeRedisNotConfigured, "r 服务暂未开启"))
 		return
 	}
 
@@ -212,7 +212,7 @@ func (c *ChatEngine) GinHandleForgotPassword(ctx *gin.Context) {
 		return
 	}
 	if c.config == nil || c.config.RDB == nil {
-		ctx.JSON(http.StatusOK, response.Error(response.CodeRedisNotConfigured, "redis is not configured"))
+		ctx.JSON(http.StatusOK, response.Error(response.CodeRedisNotConfigured, "r 服务暂未开启"))
 		return
 	}
 

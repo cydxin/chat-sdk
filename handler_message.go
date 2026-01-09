@@ -97,13 +97,13 @@ func (c *ChatEngine) GinHandleRecallMessage(ctx *gin.Context) {
 	msgID, err := strconv.ParseUint(msgIDStr, 10, 64)
 	msgStatus, err := strconv.ParseInt(msgStatusStr, 10, 64)
 	if err != nil || msgID == 0 {
-		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, "invalid message_id"))
+		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, "消息ID 未传"))
 		return
 	}
 
 	uid, exists := ctx.Get("user_id")
 	if !exists {
-		ctx.JSON(http.StatusUnauthorized, response.Error(response.CodeTokenInvalid, "user_id not found"))
+		ctx.JSON(http.StatusUnauthorized, response.Error(response.CodeTokenInvalid, "user_id未找到"))
 		return
 	}
 

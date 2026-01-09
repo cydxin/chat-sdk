@@ -107,6 +107,13 @@ func main() {
 		friendAPI.GET("/pending", engine.GinHandleGetPendingRequests)
 	}
 
+	// 通知模块
+	notifyAPI := api.Group("/notification")
+	{
+		notifyAPI.GET("/list", engine.GinHandleListNotifications)
+		notifyAPI.POST("/read", engine.GinHandleMarkNotificationsRead)
+	}
+
 	// 房间模块
 	roomAPI := api.Group("/room")
 	{

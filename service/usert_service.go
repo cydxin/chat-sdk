@@ -142,10 +142,10 @@ func pickIdentifier(phone, email string) (string, error) {
 	phone = strings.TrimSpace(phone)
 	email = normalizeEmail(email)
 	if phone == "" && email == "" {
-		return "", fmt.Errorf("phone or email is required")
+		return "", fmt.Errorf("请通过电话或电子邮件")
 	}
 	if phone != "" && email != "" {
-		return "", fmt.Errorf("phone and email cannot both be provided")
+		return "", fmt.Errorf("电话和电子邮件不可同时提供")
 	}
 	if phone != "" {
 		return phone, nil
@@ -157,11 +157,11 @@ func pickIdentifier(phone, email string) (string, error) {
 func (s *UserService) Register(ctx context.Context, req RegisterReq) error {
 	username := strings.TrimSpace(req.Username)
 	if username == "" {
-		return fmt.Errorf("username is required")
+		return fmt.Errorf("输入账号")
 	}
 	password := strings.TrimSpace(req.Password)
 	if password == "" {
-		return fmt.Errorf("password is required")
+		return fmt.Errorf("输入密码")
 	}
 	identifier, err := pickIdentifier(req.Phone, req.Email)
 	if err != nil {
@@ -169,10 +169,10 @@ func (s *UserService) Register(ctx context.Context, req RegisterReq) error {
 	}
 	code := strings.TrimSpace(req.Code)
 	if code == "" {
-		return fmt.Errorf("code is required")
+		return fmt.Errorf("输入验证码")
 	}
 	if s.RDB == nil {
-		return fmt.Errorf("redis is not configured")
+		return fmt.Errorf("r 服务暂未开启")
 	}
 
 	ok, err := s.verifyCodeService.VerifyCode(ctx, VerifyCodePurposeRegister, identifier, code)
@@ -180,7 +180,7 @@ func (s *UserService) Register(ctx context.Context, req RegisterReq) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("invalid verification code")
+		return fmt.Errorf("输入验证码")
 	}
 
 	exists, err := s.userDao.ExistsByAccount(username, req.Phone, req.Email)
@@ -188,7 +188,7 @@ func (s *UserService) Register(ctx context.Context, req RegisterReq) error {
 		return err
 	}
 	if exists {
-		return fmt.Errorf("user already exists")
+		return fmt.Errorf("用户不存在")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -234,21 +234,21 @@ func (s *UserService) Login(req LoginReq) (*UserDTO, error) {
 func (s *UserService) LoginWithToken(ctx context.Context, req LoginReq) (*LoginResp, error) {
 	acc := normalizeAccount(req.Account)
 	if acc == "" {
-		return nil, fmt.Errorf("account is required")
+		return nil, fmt.Errorf("需要账户")
 	}
 	password := strings.TrimSpace(req.Password)
 	code := strings.TrimSpace(req.Code)
 	if password == "" && code == "" {
-		return nil, fmt.Errorf("password or code is required")
+		return nil, fmt.Errorf("需要密码或验证码")
 	}
 	if password != "" && code != "" {
-		return nil, fmt.Errorf("password and code cannot both be provided")
+		return nil, fmt.Errorf("密码和代码不能同时提供")
 	}
 
 	u, err := s.userDao.FindByAccount(acc)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("invalid account or password")
+			return nil, fmt.Errorf("账户或密码无效")
 		}
 		return nil, err
 	}
@@ -256,19 +256,19 @@ func (s *UserService) LoginWithToken(ctx context.Context, req LoginReq) (*LoginR
 	// 1) 密码登录
 	if password != "" {
 		if err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password)); err != nil {
-			return nil, fmt.Errorf("invalid account or password")
+			return nil, fmt.Errorf("账户或密码无效")
 		}
 	} else {
 		// 2) 验证码登录
 		if s.RDB == nil {
-			return nil, fmt.Errorf("redis is not configured")
+			return nil, fmt.Errorf("r 服务暂未开启")
 		}
 		ok, err := s.verifyCodeService.VerifyCode(ctx, VerifyCodePurposeLogin, acc, code)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
-			return nil, fmt.Errorf("invalid verification code")
+			return nil, fmt.Errorf("无效验证码")
 		}
 	}
 
@@ -306,18 +306,18 @@ func (s *UserService) LoginWithToken(ctx context.Context, req LoginReq) (*LoginR
 func (s *UserService) ForgotPassword(ctx context.Context, req ForgotPasswordReq) error {
 	identifier := normalizeAccount(req.Identifier)
 	if identifier == "" {
-		return fmt.Errorf("identifier is required")
+		return fmt.Errorf("需要标识符")
 	}
 	newPwd := strings.TrimSpace(req.NewPassword)
 	if newPwd == "" {
-		return fmt.Errorf("new_password is required")
+		return fmt.Errorf("输入新密码")
 	}
 	code := strings.TrimSpace(req.Code)
 	if code == "" {
-		return fmt.Errorf("code is required")
+		return fmt.Errorf("需要验证码")
 	}
 	if s.RDB == nil {
-		return fmt.Errorf("redis is not configured")
+		return fmt.Errorf("r 服务暂未开启")
 	}
 
 	u, err := s.userDao.FindByAccount(identifier)
@@ -330,7 +330,7 @@ func (s *UserService) ForgotPassword(ctx context.Context, req ForgotPasswordReq)
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("invalid verification code")
+		return fmt.Errorf("输入验证码")
 	}
 
 	return s.UpdatePassword(u.ID, newPwd)
@@ -386,7 +386,7 @@ func (s *UserService) UpdateUser(userID uint64, req UpdateUserReq) (*UserDTO, er
 func (s *UserService) UpdatePassword(userID uint64, newPassword string) error {
 	newPassword = strings.TrimSpace(newPassword)
 	if newPassword == "" {
-		return fmt.Errorf("new password is required")
+		return fmt.Errorf("输入新密码")
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {

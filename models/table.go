@@ -104,13 +104,14 @@ type Room struct {
 	// 不参与任何外键关联，避免再被 GORM 推断成 bigint。
 	RoomAccount string `gorm:"column:room_account;type:varchar(32);uniqueIndex;not null"`
 
-	Name        string `gorm:"size:100"`               // 房间名称
-	Avatar      string `gorm:"size:500"`               // 房间头像
-	Type        uint8  `gorm:"type:tinyint;default:1"` // 类型: 1-私聊 2-群聊
-	CreatorID   uint64 `gorm:"index"`                  // 创建者 ID
-	Description string `gorm:"size:500"`               // 描述
-	MemberLimit int    `gorm:"default:200"`            // 成员上限
-	IsEncrypted bool   `gorm:"default:false"`          // 是否端到端加密
+	Name          string  `gorm:"size:100"`               // 房间名称
+	Avatar        string  `gorm:"size:500"`               // 房间头像
+	Type          uint8   `gorm:"type:tinyint;default:1"` // 类型: 1-私聊 2-群聊
+	CreatorID     uint64  `gorm:"index"`                  // 创建者 ID
+	Description   string  `gorm:"size:500"`               // 描述
+	MemberLimit   int     `gorm:"default:200"`            // 成员上限
+	IsEncrypted   bool    `gorm:"default:false"`          // 是否端到端加密
+	LastMessageID *uint64 `gorm:"index"`                  // 最后一条消息 ID
 
 	// 新增禁言相关字段
 	IsMute             bool       `gorm:"default:false"` // 全员禁言开关
@@ -158,7 +159,7 @@ func (RoomUser) TableName() string {
 // Message 消息表
 type Message struct {
 	ID uint64 `gorm:"primarykey"`
-	//MessageID    string  `gorm:"size:36;uniqueIndex;not null"` // 对外消息 ID
+	//MessageUUID  string         `gorm:"size:36;uniqueIndex;not null"` // 对外消息 ID
 	RoomID       uint64         `gorm:"index;not null"`         // 房间 ID (对应 Room.ID)
 	SenderID     uint64         `gorm:"index;not null"`         // 发送者 ID
 	ReplyToMsgID *uint64        `gorm:"index"`                  // 回复的消息 ID
@@ -215,22 +216,22 @@ func (MessageStatus) TableName() string {
 
 // Conversation 会话表（每个用户的聊天会话列表）
 type Conversation struct {
-	ID            uint64  `gorm:"primarykey"`
-	UserID        uint64  `gorm:"index:idx_user_room,unique;not null"` // 用户 ID
-	RoomID        uint64  `gorm:"index:idx_user_room,unique;not null"` // 房间 ID (对应 Room.ID)
-	LastMessageID *uint64 `gorm:"index"`                               // 最后一条消息 ID
-	UnreadCount   uint64  `gorm:"default:0"`                           // 未读消息数
-	IsMuted       bool    `gorm:"default:false"`                       // 是否免打扰
-	IsPinned      bool    `gorm:"default:false"`                       // 是否置顶
-	IsVisible     bool    `gorm:"default:true"`                        // 是否在消息列表展示（用户维度）
-	LastReadMsgID *uint64 `gorm:"index"`                               // 最后阅读的消息 ID
+	ID     uint64 `gorm:"primarykey"`
+	UserID uint64 `gorm:"index:idx_user_room,unique;not null"` // 用户 ID
+	RoomID uint64 `gorm:"index:idx_user_room,unique;not null"` // 房间 ID (对应 Room.ID)
+	//LastMessageID *uint64 `gorm:"index"`                               // 最后一条消息 ID
+	//UnreadCount   uint64  `gorm:"default:0"`     // 未读消息数
+	IsMuted       bool    `gorm:"default:false"` // 是否免打扰
+	IsPinned      bool    `gorm:"default:false"` // 是否置顶
+	IsVisible     bool    `gorm:"default:true"`  // 是否在消息列表展示（用户维度）
+	LastReadMsgID *uint64 `gorm:"index"`         // 最后阅读的消息 ID
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 
 	// 关联关系
-	User        User     `gorm:"foreignKey:UserID"`
-	Room        Room     `gorm:"foreignKey:RoomID;references:ID"`
-	LastMessage *Message `gorm:"foreignKey:LastMessageID"`
+	User User `gorm:"foreignKey:UserID"`
+	Room Room `gorm:"foreignKey:RoomID;references:ID"`
+	//LastMessage *Message `gorm:"foreignKey:LastMessageID"`
 	LastReadMsg *Message `gorm:"foreignKey:LastReadMsgID"`
 }
 

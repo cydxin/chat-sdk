@@ -1,13 +1,10 @@
 package chat_sdk
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
 	"sync"
-	"time"
 
-	"github.com/cydxin/chat-sdk/message"
 	"github.com/cydxin/chat-sdk/middleware"
 	model "github.com/cydxin/chat-sdk/models"
 	"github.com/cydxin/chat-sdk/service"
@@ -24,6 +21,7 @@ type ChatEngine struct {
 	AuthService         *service.AuthService // 鉴权服务
 	MomentService       *service.MomentService
 	ConversationService *service.ConversationService
+	NotificationService *service.NotificationService
 	WsServer            *WsServer
 }
 
@@ -55,7 +53,22 @@ func NewEngine(opts ...Option) *ChatEngine {
 			RDB:         c.RDB,
 			TablePrefix: c.TablePrefix,
 			WsNotifier:  Instance.WsServer.SendToUser, // 注入 WebSocket 通知函数
+			OnlineUserGetter: func(userID uint64) (string, string, bool) {
+				Instance.WsServer.mu.RLock()
+				sess := Instance.WsServer.sessions[userID]
+				Instance.WsServer.mu.RUnlock()
+				if sess == nil {
+					return "", "", false
+				}
+				return sess.Nickname, sess.Avatar, true
+			},
 		}
+		// 注入通知服务（统一落库 + WS 推送 + HTTP 拉取）
+		baseService.Notify = service.NewNotificationService(baseService)
+		// 注入已读回执服务（延迟落库）
+		baseService.ReadReceipt = service.NewReadReceiptService(baseService)
+		// 注入 WS 会话加载服务（建连时拉取已读游标）
+		baseService.SessionBootstrap = service.NewSessionBootstrapService(baseService)
 
 		// 初始化各个 Service
 		Instance.UserService = service.NewUserService(baseService)
@@ -64,6 +77,7 @@ func NewEngine(opts ...Option) *ChatEngine {
 		Instance.MemberService = service.NewMemberService(baseService)
 		Instance.MomentService = service.NewMomentService(baseService)
 		Instance.ConversationService = service.NewConversationService(baseService)
+		Instance.NotificationService = baseService.Notify
 		Instance.AuthService = service.NewAuthService(c.RDB) // 初始化鉴权服务
 
 		// 迁移表
@@ -71,67 +85,8 @@ func NewEngine(opts ...Option) *ChatEngine {
 			log.Printf("AutoMigrate failed: %v", err)
 		}
 
-		//  使用闭包处理消息
-		Instance.WsServer.onMessage = func(client *Client, msg []byte) {
-			var req message.Req
-			if err := json.Unmarshal(msg, &req); err != nil {
-				log.Printf("Invalid message format: %v", err)
-				return
-			}
-
-			room, err := Instance.RoomService.GetRoomByID(req.SendTo)
-			if err != nil {
-				log.Printf("Room not found: %d, error: %v", req.SendTo, err)
-				return
-			}
-
-			senderID := client.UserID
-			savedMsg, err := Instance.MsgService.SaveMessage(room.ID, senderID, req.SendContent, req.SendType)
-			if err != nil {
-				log.Printf("Failed to save message: %v", err)
-				return
-			}
-
-			members, err := Instance.RoomService.GetRoomMembers(room.ID)
-			if err != nil {
-				log.Printf("Failed to get room members: %v", err)
-				return
-			}
-
-			resp := struct {
-				Type           string    `json:"type"`
-				ID             uint64    `json:"id"`
-				RoomID         uint64    `json:"room_id"`
-				RoomType       uint8     `json:"room_type"`
-				SenderID       uint64    `json:"sender_id"`
-				SenderNickname string    `json:"sender_nickname"`
-				SenderAvatar   string    `json:"sender_avatar"`
-				MsgType        uint8     `json:"msg_type"`
-				Content        string    `json:"content"`
-				CreatedAt      time.Time `json:"created_at"`
-			}{
-				Type:      "message",
-				ID:        savedMsg.ID,
-				RoomID:    room.ID,
-				RoomType:  room.Type,
-				SenderID:  savedMsg.SenderID,
-				MsgType:   savedMsg.Type,
-				Content:   savedMsg.Content,
-				CreatedAt: savedMsg.CreatedAt,
-			}
-			if client != nil {
-				resp.SenderNickname = client.Nickname
-				resp.SenderAvatar = client.Avatar
-			}
-
-			respBytes, _ := json.Marshal(resp)
-			for _, memberID := range members {
-				if memberID == senderID {
-					continue
-				}
-				Instance.WsServer.SendToUser(memberID, respBytes)
-			}
-		}
+		// 绑定 WS 回调（实现见 ws_on_message.go）
+		Instance.bindWsHandlers()
 
 	})
 
@@ -153,6 +108,8 @@ func (c *ChatEngine) AutoMigrate() error {
 		&model.Moment{},
 		&model.MomentMedia{},
 		&model.MomentComment{},
+		&model.RoomNotification{},
+		&model.RoomNotificationDelivery{},
 	)
 
 }
@@ -160,10 +117,6 @@ func (c *ChatEngine) AutoMigrate() error {
 /*
 *	提供的HTTP接口在此处，也可以直接自己写controller然后调用service
 *	推荐自己写controller，因为这样更灵活
-*
-*
-*
-*
  */
 
 // ServeWS 处理 WebSocket 请求，需要传入 userID 和 name
