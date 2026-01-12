@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cydxin/chat-sdk/message"
 	"github.com/cydxin/chat-sdk/models"
 	"gorm.io/datatypes"
 )
@@ -35,12 +36,13 @@ type ForwardReq struct {
 }
 
 type MergeForwardPayload struct {
-	Type    string `json:"type"` // merge_forward
-	Title   string `json:"title"`
-	From    uint64 `json:"from"`
-	Count   int    `json:"count"`
-	Items   []any  `json:"items"`
-	Comment string `json:"comment,omitempty"`
+	MessageID uint64 `json:"message_id"`
+	Type      string `json:"type"` // merge_forward
+	Title     string `json:"title"`
+	From      uint64 `json:"from"`
+	Count     int    `json:"count"`
+	Items     []any  `json:"items"`
+	Comment   string `json:"comment,omitempty"`
 }
 
 // ForwardMessages 支持逐条转发/合并转发。
@@ -110,7 +112,7 @@ func (s *MessageService) ForwardMessages(ctx context.Context, req ForwardReq) ([
 		case ForwardModeSingle:
 			// 可选：先发一条系统附言
 			if strings.TrimSpace(req.Comment) != "" {
-				_, _ = s.SaveMessage(toRoomID, req.FromUserID, strings.TrimSpace(req.Comment), 1)
+				_, _ = s.SaveMessage(toRoomID, req.FromUserID, strings.TrimSpace(req.Comment), 1, message.Extra{})
 			}
 			for _, m := range ordered {
 				newMsg := &models.Message{
@@ -181,16 +183,16 @@ func (s *MessageService) ForwardMessages(ctx context.Context, req ForwardReq) ([
 			createdIDs = append(createdIDs, newMsg.ID)
 
 			// 会话展示/last_message_id：复用 SaveMessage 的逻辑（但 SaveMessage 会检查禁言）
-			// 合并转发属于发送行为，仍需要禁言校验，所以这里直接调用 SaveMessage 再把 extra 补上。
-			// 为避免双写，我们简单做：更新 extra。
+			// 合并转发属于发送行为，仍需要禁言校验，直接调用 SaveMessage
 			if err := s.DB.WithContext(ctx).Model(&models.Message{}).Where("id = ?", newMsg.ID).Update("extra", newMsg.Extra).Error; err != nil {
-				// ignore
 				_ = err
 			}
 
 			if s.WsNotifier != nil {
-				notif := map[string]any{"type": EventMergeForward, "room_id": toRoomID, "message_id": newMsg.ID}
-				nb, _ := json.Marshal(notif)
+				//notif := map[string]any{"type": EventMergeForward, "room_id": toRoomID, "message_id": newMsg.ID, "content": payload}
+				payload.MessageID = newMsg.ID
+				nb, _ := json.Marshal(payload)
+
 				var memberIDs []uint64
 				_ = s.DB.WithContext(ctx).Model(&models.RoomUser{}).Where("room_id = ?", toRoomID).Pluck("user_id", &memberIDs).Error
 				for _, uid := range memberIDs {

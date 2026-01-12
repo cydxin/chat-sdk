@@ -78,26 +78,32 @@ func (c *ChatEngine) GinHandleHideConversation(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, response.Success(map[string]any{"message": "ok"}))
 }
 
-// GinHandleRecallMessage 撤回消息
-// @Summary 撤回消息
-// @Description 撤回指定消息
+type RecallReqBody struct {
+	MessageIDs []uint64 `json:"message_ids" binding:"required" example:"[123,456,789]"`
+	Status     uint8    `json:"status" binding:"required" example:"1"`
+}
+
+// GinHandleRecallMessage 撤回/删除消息（批量）
+// @Summary 撤回/删除消息（批量）
+// @Description 批量撤回/删除消息，body 传 message_ids + status
 // @Tags 消息
 // @Accept json
 // @Produce json
-// @Param message_id query uint64 true "消息ID"
-// @Param status query uint8 true "4-撤回（会在聊天窗口留下痕迹） 5-删除（自己不可见） 6/7-双删（Sender/非Sender删除)在私聊中互相可以删除，但在群中你只能删除自己的，已经管理员进行删除 "
+// @Param req body RecallReqBody true "批量操作"
 // @Success 200 {object} response.Response "成功响应"
 // @Failure 400 {object} response.Response "参数错误"
 // @Failure 500 {object} response.Response "服务器错误"
 // @Security BearerAuth
 // @Router /message/recall [post]
 func (c *ChatEngine) GinHandleRecallMessage(ctx *gin.Context) {
-	msgIDStr := ctx.Query("message_id")
-	msgStatusStr := ctx.Query("status")
-	msgID, err := strconv.ParseUint(msgIDStr, 10, 64)
-	msgStatus, err := strconv.ParseInt(msgStatusStr, 10, 64)
-	if err != nil || msgID == 0 {
-		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, "消息ID 未传"))
+
+	var req RecallReqBody
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, err.Error()))
+		return
+	}
+	if len(req.MessageIDs) == 0 {
+		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, "message_ids is required"))
 		return
 	}
 
@@ -107,14 +113,28 @@ func (c *ChatEngine) GinHandleRecallMessage(ctx *gin.Context) {
 		return
 	}
 
-	err = c.MsgService.RecallMessage(msgID, uid.(uint64), uint8(msgStatus))
+	okIDs, failedMap, err := c.MsgService.RecallMessages(req.MessageIDs, uid.(uint64), req.Status)
 	if err != nil {
-		ctx.JSON(http.StatusOK, response.Error(response.CodeInternalError, err.Error()))
+		ctx.JSON(http.StatusOK, response.Error(response.CodePermissionDeny, err.Error()))
 		return
 	}
 
-	ctx.JSON(http.StatusOK, response.Success(map[string]interface{}{
-		"message": "消息已撤回",
+	type itemResult struct {
+		MessageID uint64 `json:"message_id"`
+		Error     string `json:"error,omitempty"`
+	}
+	failList := make([]itemResult, 0, len(failedMap))
+	for mid, e := range failedMap {
+		if mid == 0 {
+			continue
+		}
+		failList = append(failList, itemResult{MessageID: mid, Error: e})
+	}
+
+	ctx.JSON(http.StatusOK, response.Success(map[string]any{
+		"message":     "ok",
+		"success_ids": okIDs,
+		"failed":      failList,
 	}))
 }
 

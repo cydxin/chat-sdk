@@ -79,7 +79,7 @@ func (c *ChatEngine) GinHandleGetUserInfo(ctx *gin.Context) {
 
 // GinHandleUserRegister 用户注册
 // @Summary 用户注册
-// @Description 创建新用户账号：username + (phone/email 二选一) + password + code
+// @Description 创建新用户账号：username + (phone/email 二选一) + password + code + nickname
 // @Tags 用户
 // @Accept json
 // @Produce json
@@ -107,7 +107,7 @@ func (c *ChatEngine) GinHandleUserRegister(ctx *gin.Context) {
 			code = response.CodeParamError
 		case strings.Contains(err.Error(), "verification code"):
 			code = response.CodeVerifyCodeInvalid
-		case strings.Contains(err.Error(), "already exists"):
+		case strings.Contains(err.Error(), "存在"):
 			code = response.CodeUserAlreadyExists
 		case strings.Contains(err.Error(), "redis"):
 			code = response.CodeRedisNotConfigured
@@ -310,6 +310,7 @@ func (c *ChatEngine) GinHandleUpdateUserAvatar(ctx *gin.Context) {
 }
 
 type UpdateUserPasswordReq struct {
+	OldPassword string `json:"old_password" binding:"required" example:"123456"`
 	NewPassword string `json:"new_password" binding:"required" example:"123456"`
 }
 
@@ -334,16 +335,21 @@ func (c *ChatEngine) GinHandleUpdateUserPassword(ctx *gin.Context) {
 
 	uid, exists := ctx.Get("user_id")
 	if !exists {
-		ctx.JSON(http.StatusUnauthorized, response.Error(response.CodeTokenInvalid, "user_id not found"))
+		ctx.JSON(http.StatusUnauthorized, response.Error(response.CodeTokenInvalid, "用户未找到"))
 		return
 	}
 
 	if strings.TrimSpace(req.NewPassword) == "" {
-		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, "new_password is required"))
+		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, "新密码必填"))
 		return
 	}
 
-	if err := c.UserService.UpdatePassword(uid.(uint64), req.NewPassword); err != nil {
+	if strings.TrimSpace(req.OldPassword) == "" {
+		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, "旧密码必填"))
+		return
+	}
+
+	if err := c.UserService.UpdatePassword(uid.(uint64), req.NewPassword, req.OldPassword); err != nil {
 		ctx.JSON(http.StatusOK, response.Error(response.CodeInternalError, err.Error()))
 		return
 	}

@@ -6,8 +6,10 @@ import (
 	"log"
 	"time"
 
+	"github.com/cydxin/chat-sdk/message"
 	"github.com/cydxin/chat-sdk/models"
 	"gorm.io/datatypes"
+	"gorm.io/gorm/clause"
 )
 
 // MessageDTO 消息数据传输对象（避免 Swagger 递归）
@@ -137,8 +139,13 @@ func NewMessageService(s *Service) *MessageService {
 }
 
 // SaveMessage 保存消息到数据库
-func (s *MessageService) SaveMessage(roomID uint64, senderID uint64, content string, msgType uint8) (*models.Message, error) {
+func (s *MessageService) SaveMessage(roomID uint64, senderID uint64, content string, msgType uint8, extra message.Extra) (*models.Message, error) {
 	if err := s.checkMuteStatus(roomID, senderID); err != nil {
+		return nil, err
+	}
+
+	extraBytes, err := json.Marshal(extra)
+	if err != nil {
 		return nil, err
 	}
 
@@ -149,14 +156,14 @@ func (s *MessageService) SaveMessage(roomID uint64, senderID uint64, content str
 		Type:     msgType,
 		Content:  content,
 		Status:   models.MessageStatusSent, // 默认状态为已发送
+		Extra:    datatypes.JSON(extraBytes),
 	}
-	err := s.messageDAO.Create(msg)
+	err = s.messageDAO.Create(msg)
 	if err != nil {
 		return nil, err
 	}
 	log.Println(msg.ID, " 最后的消息 ID")
 	s.DB.Model(&models.Room{}).Where("id = ?", roomID).UpdateColumn("last_message_id", msg.ID)
-	//now := time.Now()
 
 	return msg, nil
 }
@@ -213,80 +220,208 @@ func (s *MessageService) checkMuteStatus(roomID, userID uint64) error {
 	return nil
 }
 
-/*
-RecallMessage 撤回消息 删除消息 双删消息
-撤回：只能撤回自己的 + 2分钟限制;
-双删：
-- 群聊：只能双删自己的消息
-- 私聊：不限制发送者（按你的需求：无限制）;
-单删：只影响自己视图（任何消息都允许删除）
-*/
-func (s *MessageService) RecallMessage(messageID, userID uint64, recallType uint8) error {
-	dao := s.messageDAO
-	msg, err := dao.FindByID(messageID)
-	if err != nil {
-		return err
+// RecallMessages 批量撤回/删除消息。
+// 返回：成功的 message_id 列表，以及失败原因（按 message_id）。
+func (s *MessageService) RecallMessages(messageIDs []uint64, userID uint64, recallType uint8) (okIDs []uint64, failed map[uint64]string, err error) {
+	failed = make(map[uint64]string)
+	if userID == 0 {
+		return nil, map[uint64]string{0: "user_id is required"}, fmt.Errorf("user_id is required")
+	}
+	if len(messageIDs) == 0 {
+		return []uint64{}, failed, nil
 	}
 
-	switch recallType {
-	case models.MessageStatusRecalled:
-		if msg.SenderID != userID {
-			return fmt.Errorf("撤回只能操作自己的消息")
+	// 去重 + 清洗
+	uniq := make(map[uint64]struct{}, len(messageIDs))
+	ids := make([]uint64, 0, len(messageIDs))
+	for _, id := range messageIDs {
+		if id == 0 {
+			continue
 		}
-		if time.Since(msg.CreatedAt) > 2*time.Minute {
-			return fmt.Errorf("消息撤回时间已过")
+		if _, ok := uniq[id]; ok {
+			continue
 		}
-		if err := dao.UpdateStatus(messageID, models.MessageStatusRecalled); err != nil {
-			return err
+		uniq[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return []uint64{}, failed, nil
+	}
+
+	// 批量查消息
+	var msgs []models.Message
+	if err := s.DB.Model(&models.Message{}).
+		Where("id IN ?", ids).
+		Find(&msgs).Error; err != nil {
+		return nil, nil, err
+	}
+	msgByID := make(map[uint64]models.Message, len(msgs))
+	roomIDsSet := make(map[uint64]struct{}, len(msgs))
+	for _, m := range msgs {
+		msgByID[m.ID] = m
+		roomIDsSet[m.RoomID] = struct{}{}
+	}
+	for _, id := range ids {
+		if _, ok := msgByID[id]; !ok {
+			failed[id] = "message not found"
 		}
-	case models.MessageStatusDeleted:
-		if err := dao.DeleteForUser(userID, messageID); err != nil {
-			return err
+	}
+
+	if len(msgByID) == 0 {
+		return []uint64{}, failed, nil
+	}
+
+	// 批量查房间类型（用于群聊双删权限）
+	roomIDs := make([]uint64, 0, len(roomIDsSet))
+	for rid := range roomIDsSet {
+		roomIDs = append(roomIDs, rid)
+	}
+	var rooms []models.Room
+	if err := s.DB.Model(&models.Room{}).
+		Select("id, type").
+		Where("id IN ?", roomIDs).
+		Find(&rooms).Error; err != nil {
+		return nil, nil, err
+	}
+	roomTypeByID := make(map[uint64]uint8, len(rooms))
+	for _, r := range rooms {
+		roomTypeByID[r.ID] = r.Type
+	}
+
+	now := time.Now()
+
+	// 单事务执行批量变更
+	tx := s.DB.Begin()
+	if tx.Error != nil {
+		return nil, nil, tx.Error
+	}
+	defer tx.Rollback()
+
+	// 需要更新 message.status 的 IDs（撤回/双删）
+	setStatusIDs := make([]uint64, 0, len(ids))
+	setStatusTo := 0
+
+	// 需要插入/更新 message_status（单删）
+	statusRows := make([]models.MessageStatus, 0)
+	statusUpdateIDs := make([]uint64, 0)
+
+	for _, id := range ids {
+		m, ok := msgByID[id]
+		if !ok {
+			continue
 		}
-	case models.MessageStatusBothDeleted:
-		var room models.Room
-		if err := s.DB.Where("id = ?", msg.RoomID).First(&room).Error; err != nil {
-			return err
+
+		switch recallType {
+		case models.MessageStatusRecalled:
+			if m.SenderID != userID {
+				failed[id] = "撤回只能操作自己的消息"
+				continue
+			}
+			if now.Sub(m.CreatedAt) > 2*time.Minute {
+				failed[id] = "消息撤回时间已过"
+				continue
+			}
+			setStatusIDs = append(setStatusIDs, id)
+			setStatusTo = models.MessageStatusRecalled
+			okIDs = append(okIDs, id)
+
+		case models.MessageStatusDeleted:
+			// 单删：写入 message_status（用户维度）
+			statusRows = append(statusRows, models.MessageStatus{UserID: userID, MessageID: id, RoomID: m.RoomID, IsDeleted: true, CreatedAt: now, UpdatedAt: now})
+			statusUpdateIDs = append(statusUpdateIDs, id)
+			okIDs = append(okIDs, id)
+
+		case models.MessageStatusBothDeleted:
+			// 群聊双删：只能删除自己的
+			if roomTypeByID[m.RoomID] == 2 {
+				if m.SenderID != userID {
+					failed[id] = "群聊双删只能操作自己的消息"
+					continue
+				}
+			}
+			setStatusIDs = append(setStatusIDs, id)
+			setStatusTo = models.MessageStatusBothDeleted
+			okIDs = append(okIDs, id)
+		default:
+			failed[id] = "不支持的操作类型"
+			continue
 		}
-		if room.Type == 2 {
-			if msg.SenderID != userID {
-				return fmt.Errorf("群聊双删只能操作自己的消息")
+	}
+
+	// 批量更新 message.status
+	if len(setStatusIDs) > 0 {
+		if err := tx.Model(&models.Message{}).
+			Where("id IN ?", setStatusIDs).
+			Update("status", setStatusTo).Error; err != nil {
+			return nil, nil, err
+		}
+	}
+
+	// 单删：批量 upsert message_status.is_deleted=true
+	if len(statusRows) > 0 {
+		// 先插入（唯一键冲突则忽略），再统一 update
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&statusRows).Error; err != nil {
+			return nil, nil, err
+		}
+		if err := tx.Model(&models.MessageStatus{}).
+			Where("user_id = ? AND message_id IN ?", userID, statusUpdateIDs).
+			Updates(map[string]any{"is_deleted": true, "updated_at": now}).Error; err != nil {
+			return nil, nil, err
+		}
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return nil, nil, err
+	}
+
+	// 通知：撤回/双删才通知（单删不打扰）
+	needNotify := recallType == models.MessageStatusRecalled || recallType == models.MessageStatusBothDeleted
+	if needNotify {
+		// 按 room 聚合 message_ids
+		roomToMsgIDs := make(map[uint64][]uint64)
+		for _, id := range okIDs {
+			m, ok := msgByID[id]
+			if !ok {
+				continue
+			}
+			roomToMsgIDs[m.RoomID] = append(roomToMsgIDs[m.RoomID], id)
+		}
+
+		for roomID, mids := range roomToMsgIDs {
+			// members
+			var members []uint64
+			_ = s.DB.Model(&models.RoomUser{}).
+				Where("room_id = ?", roomID).
+				Pluck("user_id", &members).Error
+
+			payload := map[string]any{
+				"recall_type":  recallType,
+				"message_ids":  mids,
+				"room_id":      roomID,
+				"operator_id":  userID,
+				"operator_uid": userID,
+			}
+
+			// 有 Notify 就用统一通知落库+WS；没有则保留旧 WS notifier
+			if s.Notify != nil {
+				_, _ = s.Notify.PublishRoomEvent(roomID, userID, EventRecall, payload, members, true)
+			} else if s.WsNotifier != nil {
+				notification := map[string]any{
+					"type":        EventRecall,
+					"recall_type": recallType,
+					"message_ids": mids,
+					"room_id":     roomID,
+					"user_id":     userID,
+				}
+				b, _ := json.Marshal(notification)
+				for _, memberID := range members {
+					s.WsNotifier(memberID, b)
+				}
 			}
 		}
-
-		if err := dao.DeleteForEveryone(messageID); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("不支持的操作类型")
 	}
 
-	// 通知房间成员（单删通常不需要通知别人；为了避免打扰，这里只在撤回/双删时通知）
-	needNotify := recallType == models.MessageStatusRecalled || recallType == models.MessageStatusBothDeleted
-	if needNotify && s.WsNotifier != nil {
-		// 获取房间成员
-		var members []uint64
-		s.DB.Model(models.RoomUser{}).
-			Where("room_id = ?", msg.RoomID).
-			Pluck("user_id", &members)
-
-		// 构造通知消息
-		notification := map[string]interface{}{
-			"type":        EventRecall,
-			"recall_type": recallType,
-			"message_id":  messageID,
-			"room_id":     msg.RoomID,
-			"user_id":     userID,
-		}
-		notifBytes, _ := json.Marshal(notification)
-
-		// 通知所有成员
-		for _, memberID := range members {
-			s.WsNotifier(memberID, notifBytes)
-		}
-	}
-
-	return nil
+	return okIDs, failed, nil
 }
 
 // GetRoomMessages 获取房间消息列表（分页）

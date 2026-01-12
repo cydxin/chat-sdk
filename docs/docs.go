@@ -817,7 +817,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "撤回指定消息",
+                "description": "批量撤回/删除消息，body 传 message_ids + status",
                 "consumes": [
                     "application/json"
                 ],
@@ -827,23 +827,16 @@ const docTemplate = `{
                 "tags": [
                     "消息"
                 ],
-                "summary": "撤回消息",
+                "summary": "撤回/删除消息（批量）",
                 "parameters": [
                     {
-                        "type": "integer",
-                        "format": "int64",
-                        "description": "消息ID",
-                        "name": "message_id",
-                        "in": "query",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "format": "int32",
-                        "description": "4-撤回（会在聊天窗口留下痕迹） 5-删除（自己不可见） 6/7-双删（Sender/非Sender删除)在私聊中互相可以删除，但在群中你只能删除自己的，已经管理员进行删除 ",
-                        "name": "status",
-                        "in": "query",
-                        "required": true
+                        "description": "批量操作",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.RecallReqBody"
+                        }
                     }
                 ],
                 "responses": {
@@ -2343,7 +2336,7 @@ const docTemplate = `{
         },
         "/user/register": {
             "post": {
-                "description": "创建新用户账号：username + (phone/email 二选一) + password + code",
+                "description": "创建新用户账号：username + (phone/email 二选一) + password + code + nickname",
                 "consumes": [
                     "application/json"
                 ],
@@ -2593,6 +2586,9 @@ const docTemplate = `{
                 }
             }
         },
+        "chat_sdk.RecallReqBody": {
+            "type": "object"
+        },
         "chat_sdk.RoomMemberReq": {
             "type": "object",
             "required": [
@@ -2791,10 +2787,15 @@ const docTemplate = `{
         "chat_sdk.UpdateUserPasswordReq": {
             "type": "object",
             "required": [
-                "new_password"
+                "new_password",
+                "old_password"
             ],
             "properties": {
                 "new_password": {
+                    "type": "string",
+                    "example": "123456"
+                },
+                "old_password": {
                     "type": "string",
                     "example": "123456"
                 }
@@ -2953,10 +2954,6 @@ const docTemplate = `{
                     "description": "是否为系统消息",
                     "type": "boolean"
                 },
-                "messageUUID": {
-                    "description": "对外消息 ID",
-                    "type": "string"
-                },
                 "replyTo": {
                     "$ref": "#/definitions/models.Message"
                 },
@@ -2973,7 +2970,7 @@ const docTemplate = `{
                     ]
                 },
                 "roomID": {
-                    "description": "房间 ID (对应 Room.ID)",
+                    "description": "MessageUUID  string         ` + "`" + `gorm:\"size:36;uniqueIndex;not null\"` + "`" + ` // 对外消息 ID",
                     "type": "integer"
                 },
                 "sender": {
@@ -3035,6 +3032,10 @@ const docTemplate = `{
                 "isMute": {
                     "description": "新增禁言相关字段",
                     "type": "boolean"
+                },
+                "lastMessageID": {
+                    "description": "最后一条消息 ID",
+                    "type": "integer"
                 },
                 "memberLimit": {
                     "description": "成员上限",
@@ -3577,6 +3578,9 @@ const docTemplate = `{
                 },
                 "email": {
                     "description": "phone/email 二选一",
+                    "type": "string"
+                },
+                "nickname": {
                     "type": "string"
                 },
                 "password": {

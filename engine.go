@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/cydxin/chat-sdk/middleware"
 	model "github.com/cydxin/chat-sdk/models"
@@ -36,6 +37,15 @@ func NewEngine(opts ...Option) *ChatEngine {
 	once.Do(func() {
 		c := &Config{
 			TablePrefix: "im_", // Default
+			GroupAvatarMerge: GroupAvatarMergeConfig{
+				Enabled:    true,
+				CanvasSize: 256,
+				Padding:    8,
+				Gap:        4,
+				Timeout:    5 * time.Second,
+				OutputDir:  "",
+				URLPrefix:  "",
+			},
 		}
 		for _, opt := range opts {
 			opt(c)
@@ -53,14 +63,41 @@ func NewEngine(opts ...Option) *ChatEngine {
 			RDB:         c.RDB,
 			TablePrefix: c.TablePrefix,
 			WsNotifier:  Instance.WsServer.SendToUser, // 注入 WebSocket 通知函数
+			GroupAvatarMergeConfig: &service.GroupAvatarMergeConfig{
+				Enabled:    c.GroupAvatarMerge.Enabled,
+				CanvasSize: c.GroupAvatarMerge.CanvasSize,
+				Padding:    c.GroupAvatarMerge.Padding,
+				Gap:        c.GroupAvatarMerge.Gap,
+				Timeout:    c.GroupAvatarMerge.Timeout,
+				OutputDir:  c.GroupAvatarMerge.OutputDir,
+				URLPrefix:  c.GroupAvatarMerge.URLPrefix,
+			},
 			OnlineUserGetter: func(userID uint64) (string, string, bool) {
 				Instance.WsServer.mu.RLock()
-				sess := Instance.WsServer.sessions[userID]
+				sess := Instance.WsServer.Sessions[userID]
 				Instance.WsServer.mu.RUnlock()
 				if sess == nil {
 					return "", "", false
 				}
 				return sess.Nickname, sess.Avatar, true
+			},
+			SessionReadGetter: func(userID uint64) map[uint64]uint64 {
+				Instance.WsServer.mu.RLock()
+				sess := Instance.WsServer.Sessions[userID]
+				Instance.WsServer.mu.RUnlock()
+				if sess == nil {
+					return nil
+				}
+				sess.ReadMu.Lock()
+				defer sess.ReadMu.Unlock()
+				if len(sess.ReadList) == 0 {
+					return nil
+				}
+				snap := make(map[uint64]uint64, len(sess.ReadList))
+				for k, v := range sess.ReadList {
+					snap[k] = v
+				}
+				return snap
 			},
 		}
 		// 注入通知服务（统一落库 + WS 推送 + HTTP 拉取）
@@ -85,8 +122,8 @@ func NewEngine(opts ...Option) *ChatEngine {
 			log.Printf("AutoMigrate failed: %v", err)
 		}
 
-		// 绑定 WS 回调（实现见 ws_on_message.go）
-		Instance.bindWsHandlers()
+		// 绑定 WS 回调
+		Instance.bindWsHandlersOnMessage()
 
 	})
 

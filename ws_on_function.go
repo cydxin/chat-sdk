@@ -12,14 +12,13 @@ import (
 // bindWsHandlers 将 WS 回调从 engine.go 抽出来，避免 engine.go 臃肿。
 // 说明：放在 chat_sdk 包根目录（同 WsServer/engine.go 同级），
 // 这样可以直接访问 Instance 与 Client 类型，避免 service 层循环依赖。
-func (c *ChatEngine) bindWsHandlers() {
+func (c *ChatEngine) bindWsHandlersOnMessage() {
 	c.WsServer.onMessage = func(client *Client, msg []byte) {
 		// 1) 先尝试解析 type
 		var typeProbe struct {
 			Type string `json:"type"`
 		}
 		_ = json.Unmarshal(msg, &typeProbe)
-
 		// 已读回执
 		if typeProbe.Type == message.WsTypeReadAck {
 			var ack message.ReadAckReq
@@ -29,16 +28,14 @@ func (c *ChatEngine) bindWsHandlers() {
 			if client == nil || ack.RoomID == 0 || ack.LastReadMsgID == 0 {
 				return
 			}
-
 			// 写入 session.readList（用户级共享内存）
 			if client.session != nil {
 				client.session.mergeRead(ack.RoomID, ack.LastReadMsgID)
 			}
-
 			return
 		}
 
-		// 发送消息（沿用原逻辑）
+		// 发送消息
 		var req message.Req
 		if err := json.Unmarshal(msg, &req); err != nil {
 			log.Printf("Invalid message format: %v", err)
@@ -53,9 +50,7 @@ func (c *ChatEngine) bindWsHandlers() {
 			log.Printf("Room not found: %d, error: %v", req.SendTo, err)
 			return
 		}
-
 		senderID := client.UserID
-
 		// 1) 私聊拉黑校验（基于 friend.status=2）
 		if room.Type == 1 {
 			blocked, err := isBlockedPrivate(room.ID, senderID)
@@ -68,7 +63,6 @@ func (c *ChatEngine) bindWsHandlers() {
 				return
 			}
 		}
-
 		// 2) 群聊成员存在性校验（防止退群/被踢还继续发）
 		if room.Type == 2 {
 			ok, err := isRoomMember(room.ID, senderID)
@@ -81,32 +75,37 @@ func (c *ChatEngine) bindWsHandlers() {
 				return
 			}
 		}
-
 		// 3) 保存消息（内部已处理群禁言/个人禁言）
-		savedMsg, err := Instance.MsgService.SaveMessage(room.ID, senderID, req.SendContent, req.SendType)
+		savedMsg, err := Instance.MsgService.SaveMessage(room.ID, senderID, req.SendContent, req.SendType, req.Extra)
 		if err != nil {
 			sendWsError(senderID, err.Error(), req.PacketID)
 			return
 		}
 
+		extraBytes, _ := json.Marshal(req.Extra)
+		// 写入session
+		if client.session != nil {
+			client.session.mergeRead(room.ID, savedMsg.ID)
+		}
 		members, err := Instance.RoomService.GetRoomMembers(room.ID)
 		if err != nil {
 			log.Printf("Failed to get room members: %v", err)
 			return
 		}
-		Instance.ConversationService.SetConversationVisible(room.ID)
+		_ = Instance.ConversationService.SetConversationVisible(room.ID)
 		resp := struct {
-			Type           string    `json:"type"`
-			PacketID       string    `json:"packet_id"`
-			ID             uint64    `json:"id"`
-			RoomID         uint64    `json:"room_id"`
-			RoomType       uint8     `json:"room_type"`
-			SenderID       uint64    `json:"sender_id"`
-			SenderNickname string    `json:"sender_nickname"`
-			SenderAvatar   string    `json:"sender_avatar"`
-			MsgType        uint8     `json:"msg_type"`
-			Content        string    `json:"content"`
-			CreatedAt      time.Time `json:"created_at"`
+			Type           string          `json:"type"`
+			PacketID       string          `json:"packet_id"`
+			ID             uint64          `json:"id"`
+			RoomID         uint64          `json:"room_id"`
+			RoomType       uint8           `json:"room_type"`
+			SenderID       uint64          `json:"sender_id"`
+			SenderNickname string          `json:"sender_nickname"`
+			SenderAvatar   string          `json:"sender_avatar"`
+			MsgType        uint8           `json:"msg_type"`
+			Content        string          `json:"content"`
+			Extra          json.RawMessage `json:"extra,omitempty"`
+			CreatedAt      time.Time       `json:"created_at"`
 		}{
 			Type:      "message",
 			PacketID:  req.PacketID,
@@ -116,6 +115,7 @@ func (c *ChatEngine) bindWsHandlers() {
 			SenderID:  savedMsg.SenderID,
 			MsgType:   savedMsg.Type,
 			Content:   savedMsg.Content,
+			Extra:     extraBytes,
 			CreatedAt: savedMsg.CreatedAt,
 		}
 

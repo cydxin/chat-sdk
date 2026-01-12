@@ -107,10 +107,18 @@ func (s *ConversationService) GetConversationList(userID uint64) ([]Conversation
 	}
 
 	// 预计算未读数：roomID -> unread
-	// 说明：避免逐 room COUNT 的 N+1 查询，改为一次聚合查询批量统计。
-	// 未读定义：在 (lastRead, lastMsgID] 区间内的消息条数。
+	// 设计：ReadList 只保存“有未读的房间”以及对应 last_read_msg_id。
+	// - 命中 ReadList：用 (lastRead, lastMsgID] 统计未读数。
+	// - 未命中 ReadList：视为 0（说明该房间没有未读）。
 	unreadMap := make(map[uint64]uint64, len(roomIDs))
-	// 先准备需要统计的区间条件
+
+	sessionReads := map[uint64]uint64{}
+	if s.SessionReadGetter != nil {
+		if m := s.SessionReadGetter(userID); len(m) > 0 {
+			sessionReads = m
+		}
+	}
+
 	type rng struct {
 		roomID    uint64
 		lastRead  uint64
@@ -123,27 +131,28 @@ func (s *ConversationService) GetConversationList(userID uint64) ([]Conversation
 			unreadMap[rid] = 0
 			continue
 		}
-		c := convMap[rid]
 		if r.LastMessageID == nil || *r.LastMessageID == 0 {
 			unreadMap[rid] = 0
 			continue
 		}
 		lastMsgID := *r.LastMessageID
-		var lastRead uint64
-		if c.LastReadMsgID != nil {
-			lastRead = *c.LastReadMsgID
+
+		// 未命中 sessionReads：按你的规则，代表没有未读
+		lastRead, ok := sessionReads[rid]
+		if !ok {
+			unreadMap[rid] = 0
+			continue
 		}
+
 		if lastRead >= lastMsgID {
 			unreadMap[rid] = 0
 			continue
 		}
 		ranges = append(ranges, rng{roomID: rid, lastRead: lastRead, lastMsgID: lastMsgID})
-		// 默认 0，后续查询有结果再覆盖
 		unreadMap[rid] = 0
 	}
 
 	if len(ranges) > 0 {
-		// 组装 OR 条件： (room_id=? AND id>? AND id<=?) OR ...
 		q := s.DB.Model(&models.Message{}).
 			Select("room_id, COUNT(1) AS cnt")
 		for i, rg := range ranges {

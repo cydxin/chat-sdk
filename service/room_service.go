@@ -39,7 +39,51 @@ func (s *RoomService) CreatePrivateRoom(user1, user2 uint64) (*models.Room, erro
 // CreateGroupRoom 创建群聊房间（生成可分享的群号 RoomAccount）
 func (s *RoomService) CreateGroupRoom(name string, creator uint64, members []uint64) (*models.Room, error) {
 	groupAccount := fmt.Sprintf("group_%s", uuid.New().String()[:8])
-	return s.createRoom(2, name, creator, members, &groupAccount)
+	room, err := s.createRoom(2, name, creator, members, &groupAccount)
+	if err != nil {
+		return nil, err
+	}
+
+	// 自动生成群头像（取自己 + 前8个成员）
+	cfg := MergeAvatarsConfig{}
+	if s.GroupAvatarMergeConfig != nil {
+		if !s.GroupAvatarMergeConfig.Enabled {
+			return room, nil
+		}
+		cfg.CanvasSize = s.GroupAvatarMergeConfig.CanvasSize
+		cfg.Padding = s.GroupAvatarMergeConfig.Padding
+		cfg.Gap = s.GroupAvatarMergeConfig.Gap
+		cfg.Timeout = s.GroupAvatarMergeConfig.Timeout
+		cfg.OutputDir = s.GroupAvatarMergeConfig.OutputDir
+		cfg.URLPrefix = s.GroupAvatarMergeConfig.URLPrefix
+	}
+	memberIDs := make([]uint64, 0, 9)
+	memberIDs = append(memberIDs, creator)
+	for _, uid := range members {
+		if uid == 0 || uid == creator {
+			continue
+		}
+		memberIDs = append(memberIDs, uid)
+		if len(memberIDs) >= 9 {
+			break
+		}
+	}
+
+	// 批量取头像 URL
+	var avatars []string
+	if len(memberIDs) > 0 {
+		_ = s.DB.Model(&models.User{}).
+			Where("id IN ?", memberIDs).
+			Pluck("avatar", &avatars).Error
+	}
+	if len(avatars) > 0 {
+		if merged, err := MergeMembersAvatar(avatars, cfg); err == nil && merged != nil {
+			_ = s.DB.Model(&models.Room{}).Where("id = ?", room.ID).Update("avatar", merged.URL).Error
+			room.Avatar = merged.URL
+		}
+	}
+
+	return room, nil
 }
 
 // createRoom 内部创建房间的通用方法
@@ -83,6 +127,36 @@ func (s *RoomService) createRoom(roomType uint8, name string, creator uint64, me
 		}
 		if err := tx.Create(member).Error; err != nil {
 			return nil, err
+		}
+	}
+
+	// 同步创建会话：确保成员创建房间后会话列表立即可见
+	{
+		// 去重成员，避免 creator 重复 append 导致插入重复
+		seen := make(map[uint64]struct{}, len(members))
+		uniq := make([]uint64, 0, len(members))
+		for _, uid := range members {
+			if uid == 0 {
+				continue
+			}
+			if _, ok := seen[uid]; ok {
+				continue
+			}
+			seen[uid] = struct{}{}
+			uniq = append(uniq, uid)
+		}
+
+		now := time.Now()
+		for _, uid := range uniq {
+			conv := &models.Conversation{UserID: uid, RoomID: room.ID}
+			if err := tx.FirstOrCreate(conv, map[string]any{"user_id": uid, "room_id": room.ID}).Error; err != nil {
+				return nil, err
+			}
+			if err := tx.Model(&models.Conversation{}).
+				Where("user_id = ? AND room_id = ?", uid, room.ID).
+				Updates(map[string]any{"is_visible": true, "updated_at": now}).Error; err != nil {
+				return nil, err
+			}
 		}
 	}
 

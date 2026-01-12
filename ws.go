@@ -66,41 +66,46 @@ type UserSession struct {
 	Nickname string
 	Avatar   string
 
-	readMu   sync.Mutex
-	readList map[uint64]uint64
+	ReadMu   sync.Mutex
+	ReadList map[uint64]uint64
 
 	lastSeen time.Time
 
-	// dirty 表示 readList 有更新但尚未落库
+	// dirty 表示 ReadList 有更新但尚未落库
 	dirty bool
 	// lastFlush 上次落库时间
 	lastFlush time.Time
+
+	// lastReadChangeAt ReadList 最后一次变化时间（用于回收已落库且长时间无变化的数据）
+	lastReadChangeAt time.Time
 }
 
+// 合并阅读
 func (s *UserSession) mergeRead(roomID, lastRead uint64) {
 	if roomID == 0 || lastRead == 0 {
 		return
 	}
-	s.readMu.Lock()
-	if s.readList == nil {
-		s.readList = make(map[uint64]uint64)
+	s.ReadMu.Lock()
+	if s.ReadList == nil {
+		s.ReadList = make(map[uint64]uint64)
 	}
-	if old := s.readList[roomID]; lastRead > old {
-		s.readList[roomID] = lastRead
+	if old := s.ReadList[roomID]; lastRead > old {
+		s.ReadList[roomID] = lastRead
 		s.dirty = true
+		s.lastReadChangeAt = time.Now()
 	}
 	s.lastSeen = time.Now()
-	s.readMu.Unlock()
+	s.ReadMu.Unlock()
 }
 
 func (s *UserSession) snapshotRead() map[uint64]uint64 {
-	s.readMu.Lock()
-	defer s.readMu.Unlock()
-	if len(s.readList) == 0 {
+	s.ReadMu.Lock()
+	defer s.ReadMu.Unlock()
+	if len(s.ReadList) == 0 {
 		return nil
 	}
-	snap := make(map[uint64]uint64, len(s.readList))
-	for k, v := range s.readList {
+	snap := make(map[uint64]uint64, len(s.ReadList))
+	for k, v := range s.ReadList {
 		snap[k] = v
 	}
 	return snap
@@ -108,21 +113,25 @@ func (s *UserSession) snapshotRead() map[uint64]uint64 {
 
 // markFlushed 在落库成功后调用
 func (s *UserSession) markFlushed() {
-	s.readMu.Lock()
+	s.ReadMu.Lock()
 	s.dirty = false
 	s.lastFlush = time.Now()
-	s.readMu.Unlock()
+	// flush 成功后，认为当前 ReadList 状态稳定，更新变化时间
+	if !s.lastFlush.IsZero() {
+		s.lastReadChangeAt = s.lastFlush
+	}
+	s.ReadMu.Unlock()
 }
 
 // snapshotReadAndDirty 返回快照及是否 dirty（用于周期 flush）
 func (s *UserSession) snapshotReadAndDirty() (map[uint64]uint64, bool) {
-	s.readMu.Lock()
-	defer s.readMu.Unlock()
-	if !s.dirty || len(s.readList) == 0 {
+	s.ReadMu.Lock()
+	defer s.ReadMu.Unlock()
+	if !s.dirty || len(s.ReadList) == 0 {
 		return nil, false
 	}
-	snap := make(map[uint64]uint64, len(s.readList))
-	for k, v := range s.readList {
+	snap := make(map[uint64]uint64, len(s.ReadList))
+	for k, v := range s.ReadList {
 		snap[k] = v
 	}
 	return snap, true
@@ -197,7 +206,7 @@ type WsServer struct {
 	userClients map[uint64][]*Client
 
 	// 用户级别共享 session
-	sessions map[uint64]*UserSession
+	Sessions map[uint64]*UserSession
 
 	// 用户ID -> “延迟移除/flush” 的定时器
 	gcTimers map[uint64]*time.Timer
@@ -217,7 +226,7 @@ func NewWsServer() *WsServer {
 		unregister:  make(chan *Client),
 		clients:     make(map[*Client]bool),
 		userClients: make(map[uint64][]*Client),
-		sessions:    make(map[uint64]*UserSession),
+		Sessions:    make(map[uint64]*UserSession),
 		gcTimers:    make(map[uint64]*time.Timer),
 	}
 }
@@ -233,8 +242,8 @@ func (h *WsServer) Run() {
 			// 这里不在 h.mu.Lock 下做 DB IO，避免阻塞 ws 主循环。
 			h.mu.RLock()
 			// copy sessions snapshot
-			sessions := make([]*UserSession, 0, len(h.sessions))
-			for _, s := range h.sessions {
+			sessions := make([]*UserSession, 0, len(h.Sessions))
+			for _, s := range h.Sessions {
 				sessions = append(sessions, s)
 			}
 			h.mu.RUnlock()
@@ -244,24 +253,25 @@ func (h *WsServer) Run() {
 					continue
 				}
 				snap, dirty := sess.snapshotReadAndDirty()
-				if !dirty || snap == nil {
-					continue
-				}
-
-				if Instance != nil && Instance.MsgService != nil && Instance.MsgService.ReadReceipt != nil {
-					if err := Instance.MsgService.ReadReceipt.FlushUserRead(sess.UserID, snap); err == nil {
-						sess.markFlushed()
+				if dirty && snap != nil {
+					if Instance != nil && Instance.MsgService != nil && Instance.MsgService.ReadReceipt != nil {
+						if err := Instance.MsgService.ReadReceipt.FlushUserRead(sess.UserID, snap); err == nil {
+							sess.markFlushed()
+						}
 					}
 				}
+
+				// 回收：已落库且 10 分钟无变化的 readList
+				sess.pruneReadListIfIdle(10 * time.Minute)
 			}
 
 		case client := <-h.register:
 			h.mu.Lock()
 			// 1) 复用/创建用户级 session
-			sess := h.sessions[client.UserID]
+			sess := h.Sessions[client.UserID]
 			if sess == nil {
 				sess = &UserSession{UserID: client.UserID, Name: client.Name, Nickname: client.Nickname, Avatar: client.Avatar, lastSeen: time.Now()}
-				h.sessions[client.UserID] = sess
+				h.Sessions[client.UserID] = sess
 			} else {
 				// 更新用户资料（以最新连接为准）
 				sess.Name = client.Name
@@ -309,7 +319,7 @@ func (h *WsServer) Run() {
 				// timer 回调里不要直接用 client 指针（可能已复用/已变化），用 uid 查当前状态
 				h.mu.RLock()
 				conns := h.userClients[uid]
-				sess := h.sessions[uid]
+				sess := h.Sessions[uid]
 				h.mu.RUnlock()
 
 				if len(conns) > 0 {
@@ -330,7 +340,7 @@ func (h *WsServer) Run() {
 				// 清理 maps
 				h.mu.Lock()
 				delete(h.userClients, uid)
-				delete(h.sessions, uid)
+				delete(h.Sessions, uid)
 				delete(h.gcTimers, uid)
 				h.mu.Unlock()
 			})
@@ -414,12 +424,12 @@ func (h *WsServer) ServeWS(w http.ResponseWriter, r *http.Request, userID uint64
 
 	// 复用/创建用户级 session
 	h.mu.Lock()
-	sess := h.sessions[userID]
+	sess := h.Sessions[userID]
 	created := false
 	if sess == nil {
 		created = true
 		sess = &UserSession{UserID: userID, Name: name, Nickname: nickname, Avatar: avatar, lastSeen: time.Now()}
-		h.sessions[userID] = sess
+		h.Sessions[userID] = sess
 	} else {
 		sess.Name = name
 		sess.Nickname = nickname
@@ -436,18 +446,18 @@ func (h *WsServer) ServeWS(w http.ResponseWriter, r *http.Request, userID uint64
 	// 建连时从 DB 加载可见会话的 last_read_msg_id 到 session.readList
 	// 只在 session 新建或当前 readList 为空时加载，避免每次重连都打 DB。
 	if Instance != nil && Instance.MsgService != nil && Instance.MsgService.SessionBootstrap != nil {
-		sess.readMu.Lock()
-		empty := len(sess.readList) == 0
-		sess.readMu.Unlock()
+		sess.ReadMu.Lock()
+		empty := len(sess.ReadList) == 0
+		sess.ReadMu.Unlock()
 		if created || empty {
 			if m, err := Instance.MsgService.SessionBootstrap.GetVisibleConversationLastReads(userID); err == nil {
 				for roomID, lastRead := range m {
 					sess.mergeRead(roomID, lastRead)
 				}
 				// 初始化加载不算未落库变更
-				sess.readMu.Lock()
+				sess.ReadMu.Lock()
 				sess.dirty = false
-				sess.readMu.Unlock()
+				sess.ReadMu.Unlock()
 			}
 		}
 	}
@@ -486,4 +496,37 @@ func (h *WsServer) SendToUser(userID uint64, msg []byte) {
 			// 丢弃避免阻塞
 		}
 	}
+}
+
+// pruneReadListIfIdle 清理已落库且长时间无变化的 ReadList，释放内存。
+// - 仅当 session 非 dirty 时执行，避免丢失待落库数据。
+// - idleFor: 无变化阈值（例如 10 分钟）。
+func (s *UserSession) pruneReadListIfIdle(idleFor time.Duration) {
+	if idleFor <= 0 {
+		return
+	}
+	now := time.Now()
+
+	s.ReadMu.Lock()
+	defer s.ReadMu.Unlock()
+	if s.dirty {
+		return
+	}
+	if len(s.ReadList) == 0 {
+		return
+	}
+	// 只回收“已经落库”的数据：lastFlush 为 0 表示从未 flush 过
+	if s.lastFlush.IsZero() {
+		return
+	}
+	if s.lastReadChangeAt.IsZero() {
+		// 没有变化时间，保守起见不回收
+		return
+	}
+	if now.Sub(s.lastReadChangeAt) < idleFor {
+		return
+	}
+
+	// 条件满足：已落库 + 长时间无变化，清空 readList
+	s.ReadList = nil
 }

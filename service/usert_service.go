@@ -61,6 +61,7 @@ type RegisterReq struct {
 	Username string `json:"username"`
 	Phone    string `json:"phone"` // phone/email 二选一
 	Email    string `json:"email"` // phone/email 二选一
+	NickName string `json:"nickname"`
 	Password string `json:"password"`
 	Code     string `json:"code"`
 }
@@ -163,6 +164,10 @@ func (s *UserService) Register(ctx context.Context, req RegisterReq) error {
 	if password == "" {
 		return fmt.Errorf("输入密码")
 	}
+	nickName := strings.TrimSpace(req.NickName)
+	if nickName == "" {
+		return fmt.Errorf("输入昵称")
+	}
 	identifier, err := pickIdentifier(req.Phone, req.Email)
 	if err != nil {
 		return err
@@ -183,12 +188,21 @@ func (s *UserService) Register(ctx context.Context, req RegisterReq) error {
 		return fmt.Errorf("输入验证码")
 	}
 
-	exists, err := s.userDao.ExistsByAccount(username, req.Phone, req.Email)
+	existsKind, existsVal, err := s.userDao.ExistsByAccount(username, req.Phone, req.Email)
 	if err != nil {
 		return err
 	}
-	if exists {
-		return fmt.Errorf("用户不存在")
+	if existsKind != 0 {
+		switch existsKind {
+		case 1:
+			return fmt.Errorf("用户名已存在: %s", existsVal)
+		case 2:
+			return fmt.Errorf("手机号已存在: %s", existsVal)
+		case 3:
+			return fmt.Errorf("邮箱已存在: %s", existsVal)
+		default:
+			return fmt.Errorf("用户已存在")
+		}
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -200,6 +214,7 @@ func (s *UserService) Register(ctx context.Context, req RegisterReq) error {
 	user := &models.User{
 		UID:       uuid.New().String(),
 		Username:  username,
+		Nickname:  nickName,
 		Password:  string(hash),
 		Phone:     strings.TrimSpace(req.Phone),
 		Email:     normalizeEmail(req.Email),
@@ -383,10 +398,27 @@ func (s *UserService) UpdateUser(userID uint64, req UpdateUserReq) (*UserDTO, er
 }
 
 // UpdatePassword 更新用户密码（上层自行做验证码/鉴权；这仅负责写库）
-func (s *UserService) UpdatePassword(userID uint64, newPassword string) error {
+func (s *UserService) UpdatePassword(userID uint64, newPassword string, old ...string) error {
 	newPassword = strings.TrimSpace(newPassword)
 	if newPassword == "" {
 		return fmt.Errorf("输入新密码")
+	}
+	if old != nil && len(old) > 0 {
+		oldPassword := strings.TrimSpace(old[0])
+		if oldPassword == "" {
+			return fmt.Errorf("输入旧密码")
+		}
+
+		// 获取用户当前密码
+		u, err := s.userDao.FindByID(userID)
+		if err != nil {
+			return fmt.Errorf("获取用户信息失败: %w", err)
+		}
+
+		// 验证旧密码
+		if err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(oldPassword)); err != nil {
+			return fmt.Errorf("旧密码不正确")
+		}
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {

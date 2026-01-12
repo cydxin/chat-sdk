@@ -56,6 +56,8 @@ definitions:
     required:
     - ids
     type: object
+  chat_sdk.RecallReqBody:
+    type: object
   chat_sdk.RoomMemberReq:
     properties:
       room_id:
@@ -195,8 +197,12 @@ definitions:
       new_password:
         example: "123456"
         type: string
+      old_password:
+        example: "123456"
+        type: string
     required:
     - new_password
+    - old_password
     type: object
   gorm.DeletedAt:
     properties:
@@ -303,9 +309,6 @@ definitions:
       isSystem:
         description: 是否为系统消息
         type: boolean
-      messageUUID:
-        description: 对外消息 ID
-        type: string
       replyTo:
         $ref: '#/definitions/models.Message'
       replyToMsgID:
@@ -316,7 +319,8 @@ definitions:
         - $ref: '#/definitions/models.Room'
         description: 关联关系
       roomID:
-        description: 房间 ID (对应 Room.ID)
+        description: MessageUUID  string         `gorm:"size:36;uniqueIndex;not null"`
+          // 对外消息 ID
         type: integer
       sender:
         $ref: '#/definitions/models.User'
@@ -359,6 +363,9 @@ definitions:
       isMute:
         description: 新增禁言相关字段
         type: boolean
+      lastMessageID:
+        description: 最后一条消息 ID
+        type: integer
       memberLimit:
         description: 成员上限
         type: integer
@@ -731,6 +738,8 @@ definitions:
         type: string
       email:
         description: phone/email 二选一
+        type: string
+      nickname:
         type: string
       password:
         type: string
@@ -1396,20 +1405,14 @@ paths:
     post:
       consumes:
       - application/json
-      description: 撤回指定消息
+      description: 批量撤回/删除消息，body 传 message_ids + status
       parameters:
-      - description: 消息ID
-        format: int64
-        in: query
-        name: message_id
+      - description: 批量操作
+        in: body
+        name: req
         required: true
-        type: integer
-      - description: '4-撤回（会在聊天窗口留下痕迹） 5-删除（自己不可见） 6/7-双删（Sender/非Sender删除)在私聊中互相可以删除，但在群中你只能删除自己的，已经管理员进行删除 '
-        format: int32
-        in: query
-        name: status
-        required: true
-        type: integer
+        schema:
+          $ref: '#/definitions/chat_sdk.RecallReqBody'
       produces:
       - application/json
       responses:
@@ -1427,7 +1430,7 @@ paths:
             $ref: '#/definitions/response.Response'
       security:
       - BearerAuth: []
-      summary: 撤回消息
+      summary: 撤回/删除消息（批量）
       tags:
       - 消息
   /moment/comment:
@@ -2322,7 +2325,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 创建新用户账号：username + (phone/email 二选一) + password + code
+      description: 创建新用户账号：username + (phone/email 二选一) + password + code + nickname
       parameters:
       - description: 注册信息
         in: body

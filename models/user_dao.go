@@ -156,8 +156,11 @@ func (dao *UserDAO) FindByAccount(account string) (*User, error) {
 	return nil, err
 }
 
-// ExistsByAccount 检查 username/phone/email 任意一种是否存在（用于注册唯一性校验）。
-func (dao *UserDAO) ExistsByAccount(username, phone, email string) (bool, error) {
+// ExistsByAccount 检查 username/phone/email 任意一种是否已存在（用于注册唯一性校验）。
+// 返回：
+// - kind: 0-都不存在 1-username 已存在 2-phone 已存在 3-email 已存在
+// - value: 命中的值（便于上层拼错误文案）
+func (dao *UserDAO) ExistsByAccount(username, phone, email string) (kind uint8, value string, err error) {
 	username = strings.TrimSpace(username)
 	phone = strings.TrimSpace(phone)
 	email = strings.TrimSpace(email)
@@ -165,34 +168,53 @@ func (dao *UserDAO) ExistsByAccount(username, phone, email string) (bool, error)
 		email = strings.ToLower(email)
 	}
 
+	// 组装 OR 查询（一次 SQL 搞定）
+	q := dao.db.Model(&User{}).Select("username, phone, email")
+	first := true
 	if username != "" {
-		exists, err := dao.ExistsByUsername(username)
-		if err != nil {
-			return false, err
-		}
-		if exists {
-			return true, nil
-		}
+		q = q.Where("username = ?", username)
+		first = false
 	}
 	if phone != "" {
-		exists, err := dao.ExistsByPhone(phone)
-		if err != nil {
-			return false, err
-		}
-		if exists {
-			return true, nil
+		if first {
+			q = q.Where("phone = ?", phone)
+			first = false
+		} else {
+			q = q.Or("phone = ?", phone)
 		}
 	}
 	if email != "" {
-		exists, err := dao.ExistsByEmail(email)
-		if err != nil {
-			return false, err
-		}
-		if exists {
-			return true, nil
+		if first {
+			q = q.Where("email = ?", email)
+			first = false
+		} else {
+			q = q.Or("email = ?", email)
 		}
 	}
-	return false, nil
+	if first {
+		return 0, "", nil
+	}
+
+	var hit User
+	if err := q.Limit(1).Take(&hit).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, "", nil
+		}
+		return 0, "", err
+	}
+
+	// 判断命中字段（优先级：username > phone > email）
+	if username != "" && hit.Username == username {
+		return 1, username, nil
+	}
+	if phone != "" && hit.Phone == phone {
+		return 2, phone, nil
+	}
+	if email != "" && strings.ToLower(hit.Email) == email {
+		return 3, email, nil
+	}
+	// 理论不会到这里（命中了但不匹配传入值），保守返回存在
+	return 1, hit.Username, nil
 }
 
 // UserBrief 用于返回给业务层的用户展示信息
