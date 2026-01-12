@@ -23,6 +23,7 @@ type ChatEngine struct {
 	MomentService       *service.MomentService
 	ConversationService *service.ConversationService
 	NotificationService *service.NotificationService
+	RoomNoticeService   *service.RoomNoticeService
 	WsServer            *WsServer
 }
 
@@ -108,6 +109,16 @@ func NewEngine(opts ...Option) *ChatEngine {
 		baseService.SessionBootstrap = service.NewSessionBootstrapService(baseService)
 
 		// 初始化各个 Service
+		/*
+			todo:后续升级为可按照user关键字段进行修改，引入次sdk只需要对user进行自动迁移操作（或者实现interface{}然后调用者自己注入userModel/Service）
+			e.g ：
+				type CustomUser interface {
+					GetUserID() uint64
+					GetUserNickName() uint64
+					GetUserAvatar() uint64
+					...
+				}
+		*/
 		Instance.UserService = service.NewUserService(baseService)
 		Instance.RoomService = service.NewRoomService(baseService)
 		Instance.MsgService = service.NewMessageService(baseService)
@@ -115,6 +126,7 @@ func NewEngine(opts ...Option) *ChatEngine {
 		Instance.MomentService = service.NewMomentService(baseService)
 		Instance.ConversationService = service.NewConversationService(baseService)
 		Instance.NotificationService = baseService.Notify
+		Instance.RoomNoticeService = service.NewRoomNoticeService(baseService)
 		Instance.AuthService = service.NewAuthService(c.RDB) // 初始化鉴权服务
 
 		// 迁移表
@@ -147,6 +159,7 @@ func (c *ChatEngine) AutoMigrate() error {
 		&model.MomentComment{},
 		&model.RoomNotification{},
 		&model.RoomNotificationDelivery{},
+		&model.RoomNotice{},
 	)
 
 }

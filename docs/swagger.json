@@ -1963,6 +1963,122 @@
                 }
             }
         },
+        "/room/notice/create": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "群主/管理员发布一条群公告，并通过通知服务推送给群成员",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "房间"
+                ],
+                "summary": "发布群公告",
+                "parameters": [
+                    {
+                        "description": "公告内容",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.CreateRoomNoticeReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/service.RoomNoticeDTO"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/room/notice/list": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "房间"
+                ],
+                "summary": "获取群公告列表",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.ListRoomNoticeReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/service.RoomNoticeDTO"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/room/private": {
             "post": {
                 "security": [
@@ -2536,6 +2652,31 @@
                 }
             }
         },
+        "chat_sdk.CreateRoomNoticeReq": {
+            "type": "object",
+            "required": [
+                "content",
+                "room_id"
+            ],
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "example": "公告内容"
+                },
+                "is_pinned": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "room_id": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "title": {
+                    "type": "string",
+                    "example": "公告标题"
+                }
+            }
+        },
         "chat_sdk.ForwardMessageReq": {
             "type": "object",
             "required": [
@@ -2567,6 +2708,22 @@
                     "items": {
                         "type": "integer"
                     }
+                }
+            }
+        },
+        "chat_sdk.ListRoomNoticeReq": {
+            "type": "object",
+            "required": [
+                "room_id"
+            ],
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "example": 20
+                },
+                "room_id": {
+                    "type": "integer",
+                    "example": 1
                 }
             }
         },
@@ -3401,6 +3558,12 @@
                 "name": {
                     "type": "string"
                 },
+                "notices": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.RoomNoticeDTO"
+                    }
+                },
                 "room_account": {
                     "type": "string"
                 },
@@ -3668,6 +3831,35 @@
                     "type": "integer"
                 },
                 "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.RoomNoticeDTO": {
+            "type": "object",
+            "properties": {
+                "actor_id": {
+                    "type": "integer"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_pinned": {
+                    "type": "boolean"
+                },
+                "room_id": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
                     "type": "string"
                 }
             }

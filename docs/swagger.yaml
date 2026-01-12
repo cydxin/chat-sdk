@@ -24,6 +24,24 @@ definitions:
     - members
     - name
     type: object
+  chat_sdk.CreateRoomNoticeReq:
+    properties:
+      content:
+        example: 公告内容
+        type: string
+      is_pinned:
+        example: false
+        type: boolean
+      room_id:
+        example: 1
+        type: integer
+      title:
+        example: 公告标题
+        type: string
+    required:
+    - content
+    - room_id
+    type: object
   chat_sdk.ForwardMessageReq:
     properties:
       comment:
@@ -46,6 +64,17 @@ definitions:
     required:
     - items
     - to_room_ids
+    type: object
+  chat_sdk.ListRoomNoticeReq:
+    properties:
+      limit:
+        example: 20
+        type: integer
+      room_id:
+        example: 1
+        type: integer
+    required:
+    - room_id
     type: object
   chat_sdk.MarkNotificationsReadReq:
     properties:
@@ -622,6 +651,10 @@ definitions:
         type: integer
       name:
         type: string
+      notices:
+        items:
+          $ref: '#/definitions/service.RoomNoticeDTO'
+        type: array
       room_account:
         type: string
       updated_at:
@@ -800,6 +833,25 @@ definitions:
       user_id:
         type: integer
       username:
+        type: string
+    type: object
+  service.RoomNoticeDTO:
+    properties:
+      actor_id:
+        type: integer
+      content:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      is_pinned:
+        type: boolean
+      room_id:
+        type: integer
+      title:
+        type: string
+      updated_at:
         type: string
     type: object
   service.SendCodeResult:
@@ -2110,6 +2162,73 @@ paths:
       summary: 设置用户禁言
       tags:
       - Room
+  /room/notice/create:
+    post:
+      consumes:
+      - application/json
+      description: 群主/管理员发布一条群公告，并通过通知服务推送给群成员
+      parameters:
+      - description: 公告内容
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/chat_sdk.CreateRoomNoticeReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/service.RoomNoticeDTO'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/response.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 发布群公告
+      tags:
+      - 房间
+  /room/notice/list:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/chat_sdk.ListRoomNoticeReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/service.RoomNoticeDTO'
+                  type: array
+              type: object
+      security:
+      - BearerAuth: []
+      summary: 获取群公告列表
+      tags:
+      - 房间
   /room/private:
     post:
       consumes:

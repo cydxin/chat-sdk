@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cydxin/chat-sdk/cons"
 	"github.com/cydxin/chat-sdk/message"
 	"github.com/cydxin/chat-sdk/models"
 	"gorm.io/datatypes"
@@ -132,7 +133,7 @@ func (s *MessageService) ForwardMessages(ctx context.Context, req ForwardReq) ([
 				createdIDs = append(createdIDs, newMsg.ID)
 				// 维持会话/通知：复用 SaveMessage 的后置逻辑需要更多重构；这里简化为 ws 推一次
 				if s.WsNotifier != nil {
-					notif := map[string]any{"type": EventForward, "room_id": toRoomID, "message_id": newMsg.ID}
+					notif := map[string]any{"type": cons.EventForward, "room_id": toRoomID, "message_id": newMsg.ID}
 					b, _ := json.Marshal(notif)
 					var memberIDs []uint64
 					_ = s.DB.WithContext(ctx).Model(&models.RoomUser{}).Where("room_id = ?", toRoomID).Pluck("user_id", &memberIDs).Error
@@ -144,7 +145,7 @@ func (s *MessageService) ForwardMessages(ctx context.Context, req ForwardReq) ([
 
 		case ForwardModeMerge:
 			payload := MergeForwardPayload{
-				Type:    EventMergeForward,
+				Type:    cons.EventMergeForward,
 				Title:   "聊天记录",
 				From:    req.FromUserID,
 				Count:   len(ordered),

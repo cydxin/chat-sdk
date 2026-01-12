@@ -184,13 +184,14 @@ func (Message) TableName() string {
 }
 
 const (
-	MessageStatusSending     = 0 //发送中
-	MessageStatusSent        = 1 //已发送
-	MessageStatusDelivered   = 2 //已送达
-	MessageStatusRead        = 3 //已读
-	MessageStatusRecalled    = 4 //撤回
-	MessageStatusDeleted     = 5 //删除
-	MessageStatusBothDeleted = 6 //双删
+	MessageStatusSending       = 0 //发送中
+	MessageStatusSent          = 1 //已发送
+	MessageStatusDelivered     = 2 //已送达
+	MessageStatusRead          = 3 //已读
+	MessageStatusRecalled      = 4 //撤回
+	MessageStatusDeleted       = 5 //删除
+	MessageStatusBothDeleted   = 6 //双删
+	MessageStatusMangerDeleted = 7 //群主管理员双删
 )
 
 // MessageStatus 消息状态表（记录每个用户的已读状态）

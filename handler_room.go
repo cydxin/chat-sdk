@@ -15,6 +15,7 @@ var _ = model.Room{}
 var _ = service.RoomDTO{}
 var _ = service.RoomMemberListItemDTO{}
 var _ = service.GroupInfoDTO{}
+var _ = service.RoomNoticeDTO{}
 
 // -------------------- 房间（Room）相关接口 --------------------
 
@@ -570,4 +571,80 @@ func (c *ChatEngine) GinHandleQuitGroup(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, response.Success(nil))
+}
+
+// -------------------- 群公告（Room Notice） --------------------
+
+type CreateRoomNoticeReq struct {
+	RoomID   uint64 `json:"room_id" binding:"required" example:"1"`
+	Title    string `json:"title" example:"公告标题"`
+	Content  string `json:"content" binding:"required" example:"公告内容"`
+	IsPinned bool   `json:"is_pinned" example:"false"`
+}
+
+// GinHandleCreateRoomNotice 发布群公告
+// @Summary 发布群公告
+// @Description 群主/管理员发布一条群公告，并通过通知服务推送给群成员
+// @Tags 房间
+// @Accept json
+// @Produce json
+// @Param req body CreateRoomNoticeReq true "公告内容"
+// @Success 200 {object} response.Response{data=service.RoomNoticeDTO}
+// @Failure 400 {object} response.Response
+// @Failure 500 {object} response.Response
+// @Security BearerAuth
+// @Router /room/notice/create [post]
+func (c *ChatEngine) GinHandleCreateRoomNotice(ctx *gin.Context) {
+	var req CreateRoomNoticeReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, err.Error()))
+		return
+	}
+	uid, exists := ctx.Get("user_id")
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, response.Error(response.CodeTokenInvalid, "user_id not found"))
+		return
+	}
+	if c.RoomNoticeService == nil {
+		ctx.JSON(http.StatusOK, response.Error(response.CodeInternalError, "RoomNoticeService not initialized"))
+		return
+	}
+	out, err := c.RoomNoticeService.CreateNotice(req.RoomID, uid.(uint64), req.Title, req.Content, req.IsPinned)
+	if err != nil {
+		ctx.JSON(http.StatusOK, response.Error(response.CodeInternalError, err.Error()))
+		return
+	}
+	ctx.JSON(http.StatusOK, response.Success(out))
+}
+
+type ListRoomNoticeReq struct {
+	RoomID uint64 `json:"room_id" binding:"required" example:"1"`
+	Limit  int    `json:"limit" example:"20"`
+}
+
+// GinHandleListRoomNotices 获取群公告列表
+// @Summary 获取群公告列表
+// @Tags 房间
+// @Accept json
+// @Produce json
+// @Param req body ListRoomNoticeReq true "请求参数"
+// @Success 200 {object} response.Response{data=[]service.RoomNoticeDTO}
+// @Security BearerAuth
+// @Router /room/notice/list [post]
+func (c *ChatEngine) GinHandleListRoomNotices(ctx *gin.Context) {
+	var req ListRoomNoticeReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, err.Error()))
+		return
+	}
+	if c.RoomNoticeService == nil {
+		ctx.JSON(http.StatusOK, response.Error(response.CodeInternalError, "RoomNoticeService not initialized"))
+		return
+	}
+	list, err := c.RoomNoticeService.ListNotices(req.RoomID, req.Limit)
+	if err != nil {
+		ctx.JSON(http.StatusOK, response.Error(response.CodeInternalError, err.Error()))
+		return
+	}
+	ctx.JSON(http.StatusOK, response.Success(list))
 }

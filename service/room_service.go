@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/cydxin/chat-sdk/cons"
 	"github.com/cydxin/chat-sdk/models"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -204,13 +205,14 @@ type RoomDTO struct {
 
 // GroupInfoDTO 群基础信息（不含成员列表）
 type GroupInfoDTO struct {
-	ID          uint64    `json:"id"`
-	RoomAccount string    `json:"room_account"`
-	Name        string    `json:"name"`
-	Avatar      string    `json:"avatar"`
-	CreatorID   uint64    `json:"creator_id"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          uint64          `json:"id"`
+	RoomAccount string          `json:"room_account"`
+	Name        string          `json:"name"`
+	Avatar      string          `json:"avatar"`
+	CreatorID   uint64          `json:"creator_id"`
+	Notices     []RoomNoticeDTO `json:"notices,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
 // GetGroupInfo 获取群基础信息
@@ -225,7 +227,7 @@ func (s *RoomService) GetGroupInfo(roomID uint64) (*GroupInfoDTO, error) {
 	if room.Type != 2 {
 		return nil, fmt.Errorf("此群不存在")
 	}
-	return &GroupInfoDTO{
+	out := &GroupInfoDTO{
 		ID:          room.ID,
 		RoomAccount: room.RoomAccount,
 		Name:        room.Name,
@@ -233,7 +235,23 @@ func (s *RoomService) GetGroupInfo(roomID uint64) (*GroupInfoDTO, error) {
 		CreatorID:   room.CreatorID,
 		CreatedAt:   room.CreatedAt,
 		UpdatedAt:   room.UpdatedAt,
-	}, nil
+	}
+
+	// 附带群公告（默认取最近 20 条，置顶优先）
+	var notices []models.RoomNotice
+	_ = s.DB.Model(&models.RoomNotice{}).
+		Where("room_id = ?", roomID).
+		Order("is_pinned desc").
+		Order("created_at desc").
+		Limit(20).
+		Find(&notices).Error
+	if len(notices) > 0 {
+		out.Notices = make([]RoomNoticeDTO, 0, len(notices))
+		for i := range notices {
+			out.Notices = append(out.Notices, *toRoomNoticeDTO(&notices[i]))
+		}
+	}
+	return out, nil
 }
 
 // QuitGroup 退出群聊
@@ -252,7 +270,7 @@ func (s *RoomService) QuitGroup(roomID, UID uint64) error {
 		_, _ = s.Notify.PublishRoomEvent(
 			roomID,
 			UID,
-			EventRoomMemberQuit,
+			cons.EventRoomMemberQuit,
 			map[string]any{"user_id": UID},
 			members,
 			true,
@@ -448,12 +466,12 @@ func generatePrivateRoomAccount(userID1, userID2 uint64) string {
 
 // UpdateGroupInfo 更新群聊信息（名称、头像）
 func (s *RoomService) UpdateGroupInfo(operatorID, roomID uint64, name, avatar string) error {
-	// Check permission: Admin or Owner
+	// 检查权限
 	role, err := s.getMemberRole(roomID, operatorID)
 	if err != nil {
 		return err
 	}
-	if role < 1 { // 0 is member
+	if role < 1 { // 0 用户
 		return errors.New("permission denied")
 	}
 
@@ -474,7 +492,7 @@ func (s *RoomService) UpdateGroupInfo(operatorID, roomID uint64, name, avatar st
 		_, _ = s.Notify.PublishRoomEvent(
 			roomID,
 			operatorID,
-			EventRoomGroupInfoUpdated,
+			cons.EventRoomGroupInfoUpdated,
 			map[string]any{"name": name, "avatar": avatar},
 			members,
 			true,
@@ -510,7 +528,7 @@ func (s *RoomService) SetGroupAdmin(operatorID, roomID, targetUserID uint64, isA
 		_, _ = s.Notify.PublishRoomEvent(
 			roomID,
 			operatorID,
-			EventRoomAdminSet,
+			cons.EventRoomAdminSet,
 			map[string]any{"target_user_id": targetUserID, "is_admin": isAdmin, "role": newRole},
 			members,
 			true,
@@ -549,7 +567,7 @@ func (s *RoomService) SetGroupMuteCountdown(operatorID, roomID uint64, durationM
 		_, _ = s.Notify.PublishRoomEvent(
 			roomID,
 			operatorID,
-			EventRoomGroupMuteCountdown,
+			cons.EventRoomGroupMuteCountdown,
 			map[string]any{"duration_minutes": durationMinutes},
 			members,
 			true,
@@ -582,7 +600,7 @@ func (s *RoomService) SetGroupMuteScheduled(operatorID, roomID uint64, startTime
 		_, _ = s.Notify.PublishRoomEvent(
 			roomID,
 			operatorID,
-			EventRoomGroupMuteScheduled,
+			cons.EventRoomGroupMuteScheduled,
 			map[string]any{"start_time": startTime, "duration_minutes": durationMinutes},
 			members,
 			true,
@@ -630,7 +648,7 @@ func (s *RoomService) SetUserMute(operatorID, roomID, targetUserID uint64, durat
 		_, _ = s.Notify.PublishRoomEvent(
 			roomID,
 			operatorID,
-			EventRoomUserMute,
+			cons.EventRoomUserMute,
 			map[string]any{"target_user_id": targetUserID, "duration_minutes": durationMinutes},
 			members,
 			true,

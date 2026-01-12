@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cydxin/chat-sdk/cons"
 	"github.com/cydxin/chat-sdk/models"
 	"gorm.io/gorm"
 )
@@ -66,7 +67,7 @@ func (s *MemberService) SendFriendRequest(fromUser, toUser uint64, message strin
 	// 通知对方
 	if s.WsNotifier != nil {
 		notification := map[string]interface{}{
-			"type":       EventFriendRequest,
+			"type":       cons.EventFriendRequest,
 			"request_id": request.ID,
 			"from_user":  fromUser,
 			"message":    message,
@@ -223,7 +224,7 @@ func (s *MemberService) AcceptFriendRequest(requestID uint64, userID uint64) err
 	// 通知申请者
 	if s.WsNotifier != nil {
 		notification := map[string]interface{}{
-			"type":       EventFriendAccepted,
+			"type":       cons.EventFriendAccepted,
 			"request_id": requestID,
 			"user_id":    userID,
 		}
@@ -282,7 +283,7 @@ func (s *MemberService) RejectFriendRequest(requestID uint64, userID uint64) err
 	// 通知申请者
 	if s.WsNotifier != nil {
 		notification := map[string]interface{}{
-			"type":       EventFriendRejected,
+			"type":       cons.EventFriendRejected,
 			"request_id": requestID,
 			"user_id":    userID,
 		}
@@ -329,7 +330,7 @@ func (s *MemberService) DeleteFriend(user1, user2 uint64) error {
 	// 通知对方
 	if s.WsNotifier != nil {
 		notification := map[string]interface{}{
-			"type":    EventFriendDeleted,
+			"type":    cons.EventFriendDeleted,
 			"user_id": user1,
 			"room_id": room.ID,
 		}
@@ -635,7 +636,7 @@ func (s *MemberService) AddRoomMember(roomID uint64, userIDs []uint64, operatorI
 		_, _ = s.Notify.PublishRoomEvent(
 			roomID,
 			operatorID,
-			EventRoomMemberAdded,
+			cons.EventRoomMemberAdded,
 			map[string]any{"user_ids": toAddUserInfo},
 			members,
 			true,
@@ -695,7 +696,7 @@ func (s *MemberService) RemoveRoomMember(roomID uint64, userID uint64, operatorI
 		_, _ = s.Notify.PublishRoomEvent(
 			roomID,
 			operatorID,
-			EventRoomMemberRemoved,
+			cons.EventRoomMemberRemoved,
 			map[string]any{"user_id": userID},
 			members,
 			true,

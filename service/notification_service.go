@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/cydxin/chat-sdk/cons"
 	"github.com/cydxin/chat-sdk/models"
 	"gorm.io/datatypes"
 	"gorm.io/gorm/clause"
@@ -84,7 +85,7 @@ func (s *NotificationService) PublishRoomEvent(roomID, actorID uint64, eventType
 		}
 	}
 	switch eventType {
-	case EventRoomMemberRemoved:
+	case cons.EventRoomMemberRemoved:
 		// 把移除的人也放进通知里
 		var removeID uint64
 		tmp := payload.(map[string]interface{})
@@ -92,7 +93,8 @@ func (s *NotificationService) PublishRoomEvent(roomID, actorID uint64, eventType
 			removeID = v.(uint64)
 			clean = append(clean, removeID)
 		}
-	case EventRoomMemberQuit:
+	case cons.EventRoomMemberQuit:
+		// 自己退出的话
 
 	default:
 	}
@@ -138,7 +140,7 @@ func (s *NotificationService) pushRoomEventToUsers(evt *models.RoomNotification,
 		Payload   datatypes.JSON `json:"payload,omitempty"`
 		CreatedAt time.Time      `json:"created_at"`
 	}{
-		Type:      EventNotification,
+		Type:      cons.EventNotification,
 		EventID:   evt.ID,
 		RoomID:    evt.RoomID,
 		ActorID:   evt.ActorID,

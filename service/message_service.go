@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/cydxin/chat-sdk/cons"
 	"github.com/cydxin/chat-sdk/message"
 	"github.com/cydxin/chat-sdk/models"
 	"gorm.io/datatypes"
@@ -342,6 +343,10 @@ func (s *MessageService) RecallMessages(messageIDs []uint64, userID uint64, reca
 			setStatusIDs = append(setStatusIDs, id)
 			setStatusTo = models.MessageStatusBothDeleted
 			okIDs = append(okIDs, id)
+		case models.MessageStatusMangerDeleted:
+			setStatusIDs = append(setStatusIDs, id)
+			setStatusTo = models.MessageStatusMangerDeleted
+			okIDs = append(okIDs, id)
 		default:
 			failed[id] = "不支持的操作类型"
 			continue
@@ -404,10 +409,10 @@ func (s *MessageService) RecallMessages(messageIDs []uint64, userID uint64, reca
 
 			// 有 Notify 就用统一通知落库+WS；没有则保留旧 WS notifier
 			if s.Notify != nil {
-				_, _ = s.Notify.PublishRoomEvent(roomID, userID, EventRecall, payload, members, true)
+				_, _ = s.Notify.PublishRoomEvent(roomID, userID, cons.EventRecall, payload, members, true)
 			} else if s.WsNotifier != nil {
 				notification := map[string]any{
-					"type":        EventRecall,
+					"type":        cons.EventRecall,
 					"recall_type": recallType,
 					"message_ids": mids,
 					"room_id":     roomID,

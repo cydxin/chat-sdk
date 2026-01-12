@@ -1,4 +1,4 @@
-package service
+package cons
 
 // 统一的房间/群通知事件类型（event_type）
 const (
@@ -10,6 +10,7 @@ const (
 	EventRoomMemberAdded        = "room.member.added"         // 群用户添加
 	EventRoomMemberRemoved      = "room.member.removed"       // 群用户移除(踢出去)
 	EventRoomMemberQuit         = "room.member.quit"          // 群用户退群
+	EventRoomNoticeSet          = "room.notice.set"           // 群公告发布/更新
 )
 
 // 统一的 用户通知
