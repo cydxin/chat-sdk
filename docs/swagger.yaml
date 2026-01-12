@@ -57,6 +57,17 @@ definitions:
     - ids
     type: object
   chat_sdk.RecallReqBody:
+    properties:
+      message_ids:
+        items:
+          type: integer
+        type: array
+      status:
+        example: 1
+        type: integer
+    required:
+    - message_ids
+    - status
     type: object
   chat_sdk.RoomMemberReq:
     properties:

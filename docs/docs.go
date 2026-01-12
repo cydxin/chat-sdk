@@ -2587,7 +2587,23 @@ const docTemplate = `{
             }
         },
         "chat_sdk.RecallReqBody": {
-            "type": "object"
+            "type": "object",
+            "required": [
+                "message_ids",
+                "status"
+            ],
+            "properties": {
+                "message_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "status": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
         },
         "chat_sdk.RoomMemberReq": {
             "type": "object",

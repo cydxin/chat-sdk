@@ -79,7 +79,7 @@ func (c *ChatEngine) GinHandleHideConversation(ctx *gin.Context) {
 }
 
 type RecallReqBody struct {
-	MessageIDs []uint64 `json:"message_ids" binding:"required" example:"[123,456,789]"`
+	MessageIDs []uint64 `json:"message_ids" binding:"required" swaggertype:"array,integer"`
 	Status     uint8    `json:"status" binding:"required" example:"1"`
 }
 
