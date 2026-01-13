@@ -1,5 +1,15 @@
 basePath: /api/v1
 definitions:
+  chat_sdk.CancelUserMuteReq:
+    properties:
+      room_id:
+        type: integer
+      target_user_id:
+        type: integer
+    required:
+    - room_id
+    - target_user_id
+    type: object
   chat_sdk.CommentMomentReq:
     properties:
       content:
@@ -2116,6 +2126,29 @@ paths:
       summary: 设置群禁言（倒计时）
       tags:
       - Room
+  /room/mute/group/cancel:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数（room_id 必填，duration_minutes 忽略）
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/chat_sdk.SetGroupMuteReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 取消群禁言（倒计时）
+      tags:
+      - Room
   /room/mute/group/scheduled:
     post:
       consumes:
@@ -2139,6 +2172,29 @@ paths:
       summary: 设置群禁言（定时）
       tags:
       - Room
+  /room/mute/group/scheduled/cancel:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数（room_id 必填）
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/chat_sdk.SetGroupMuteReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 取消群禁言（定时）
+      tags:
+      - Room
   /room/mute/user:
     post:
       consumes:
@@ -2160,6 +2216,29 @@ paths:
       security:
       - BearerAuth: []
       summary: 设置用户禁言
+      tags:
+      - Room
+  /room/mute/user/cancel:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/chat_sdk.CancelUserMuteReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 取消用户禁言
       tags:
       - Room
   /room/notice/create:

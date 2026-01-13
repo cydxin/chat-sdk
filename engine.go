@@ -138,7 +138,6 @@ func NewEngine(opts ...Option) *ChatEngine {
 		Instance.bindWsHandlersOnMessage()
 
 	})
-
 	return Instance
 }
 

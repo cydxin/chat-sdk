@@ -516,6 +516,92 @@ func (c *ChatEngine) GinHandleSetUserMute(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, response.Success(nil))
 }
 
+// GinHandleCancelGroupMute 取消群禁言（倒计时）
+// @Summary 取消群禁言（倒计时）
+// @Tags Room
+// @Accept json
+// @Produce json
+// @Param req body SetGroupMuteReq true "请求参数（room_id 必填，duration_minutes 忽略）"
+// @Success 200 {object} response.Response
+// @Security BearerAuth
+// @Router /room/mute/group/cancel [post]
+func (c *ChatEngine) GinHandleCancelGroupMute(ctx *gin.Context) {
+	var req SetGroupMuteReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, err.Error()))
+		return
+	}
+	uid, exists := ctx.Get("user_id")
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, response.Error(response.CodeTokenInvalid, "user_id not found"))
+		return
+	}
+	if err := c.RoomService.CancelGroupMuteCountdown(uid.(uint64), req.RoomID); err != nil {
+		ctx.JSON(http.StatusOK, response.Error(response.CodeInternalError, err.Error()))
+		return
+	}
+	ctx.JSON(http.StatusOK, response.Success(nil))
+}
+
+// GinHandleCancelGroupMuteScheduled 取消群禁言（定时）
+// @Summary 取消群禁言（定时）
+// @Tags Room
+// @Accept json
+// @Produce json
+// @Param req body SetGroupMuteReq true "请求参数（room_id 必填）"
+// @Success 200 {object} response.Response
+// @Security BearerAuth
+// @Router /room/mute/group/scheduled/cancel [post]
+func (c *ChatEngine) GinHandleCancelGroupMuteScheduled(ctx *gin.Context) {
+	var req SetGroupMuteReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, err.Error()))
+		return
+	}
+	uid, exists := ctx.Get("user_id")
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, response.Error(response.CodeTokenInvalid, "user_id not found"))
+		return
+	}
+	if err := c.RoomService.CancelGroupMuteScheduled(uid.(uint64), req.RoomID); err != nil {
+		ctx.JSON(http.StatusOK, response.Error(response.CodeInternalError, err.Error()))
+		return
+	}
+	ctx.JSON(http.StatusOK, response.Success(nil))
+}
+
+type CancelUserMuteReq struct {
+	RoomID       uint64 `json:"room_id" binding:"required"`
+	TargetUserID uint64 `json:"target_user_id" binding:"required"`
+}
+
+// GinHandleCancelUserMute 取消用户禁言
+// @Summary 取消用户禁言
+// @Tags Room
+// @Accept json
+// @Produce json
+// @Param req body CancelUserMuteReq true "请求参数"
+// @Success 200 {object} response.Response
+// @Security BearerAuth
+// @Router /room/mute/user/cancel [post]
+func (c *ChatEngine) GinHandleCancelUserMute(ctx *gin.Context) {
+	var req CancelUserMuteReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, err.Error()))
+		return
+	}
+	uid, exists := ctx.Get("user_id")
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, response.Error(response.CodeTokenInvalid, "user_id not found"))
+		return
+	}
+	if err := c.RoomService.CancelUserMute(uid.(uint64), req.RoomID, req.TargetUserID); err != nil {
+		ctx.JSON(http.StatusOK, response.Error(response.CodeInternalError, err.Error()))
+		return
+	}
+	ctx.JSON(http.StatusOK, response.Success(nil))
+}
+
 // GinHandleGetGroupInfo 获取群基础信息
 // @Summary 获取群基础信息
 // @Description 根据 room_id 获取群聊基础信息（不含成员列表）

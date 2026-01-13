@@ -576,6 +576,11 @@ func (s *RoomService) SetGroupMuteCountdown(operatorID, roomID uint64, durationM
 	return nil
 }
 
+// CancelGroupMuteCountdown 取消群禁言（倒计时模式）
+func (s *RoomService) CancelGroupMuteCountdown(operatorID, roomID uint64) error {
+	return s.SetGroupMuteCountdown(operatorID, roomID, 0)
+}
+
 // SetGroupMuteScheduled 设置群禁言（定时）
 // startTime: "HH:MM", durationMinutes: duration
 func (s *RoomService) SetGroupMuteScheduled(operatorID, roomID uint64, startTime string, durationMinutes int) error {
@@ -607,6 +612,11 @@ func (s *RoomService) SetGroupMuteScheduled(operatorID, roomID uint64, startTime
 		)
 	}
 	return nil
+}
+
+// CancelGroupMuteScheduled 取消群定时禁言
+func (s *RoomService) CancelGroupMuteScheduled(operatorID, roomID uint64) error {
+	return s.SetGroupMuteScheduled(operatorID, roomID, "", 0)
 }
 
 // SetUserMute 设置指定用户禁言
@@ -655,6 +665,11 @@ func (s *RoomService) SetUserMute(operatorID, roomID, targetUserID uint64, durat
 		)
 	}
 	return nil
+}
+
+// CancelUserMute 取消指定用户禁言
+func (s *RoomService) CancelUserMute(operatorID, roomID, targetUserID uint64) error {
+	return s.SetUserMute(operatorID, roomID, targetUserID, 0)
 }
 
 // -------------------- 群成员列表（Member List） --------------------

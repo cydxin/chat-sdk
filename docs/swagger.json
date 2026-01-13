@@ -1887,6 +1887,44 @@
                 }
             }
         },
+        "/room/mute/group/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Room"
+                ],
+                "summary": "取消群禁言（倒计时）",
+                "parameters": [
+                    {
+                        "description": "请求参数（room_id 必填，duration_minutes 忽略）",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.SetGroupMuteReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/room/mute/group/scheduled": {
             "post": {
                 "security": [
@@ -1925,6 +1963,44 @@
                 }
             }
         },
+        "/room/mute/group/scheduled/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Room"
+                ],
+                "summary": "取消群禁言（定时）",
+                "parameters": [
+                    {
+                        "description": "请求参数（room_id 必填）",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.SetGroupMuteReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/room/mute/user": {
             "post": {
                 "security": [
@@ -1950,6 +2026,44 @@
                         "required": true,
                         "schema": {
                             "$ref": "#/definitions/chat_sdk.SetUserMuteReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/room/mute/user/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Room"
+                ],
+                "summary": "取消用户禁言",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.CancelUserMuteReq"
                         }
                     }
                 ],
@@ -2616,6 +2730,21 @@
         }
     },
     "definitions": {
+        "chat_sdk.CancelUserMuteReq": {
+            "type": "object",
+            "required": [
+                "room_id",
+                "target_user_id"
+            ],
+            "properties": {
+                "room_id": {
+                    "type": "integer"
+                },
+                "target_user_id": {
+                    "type": "integer"
+                }
+            }
+        },
         "chat_sdk.CommentMomentReq": {
             "type": "object",
             "required": [
