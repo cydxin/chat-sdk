@@ -2142,6 +2142,44 @@ const docTemplate = `{
                 }
             }
         },
+        "/room/notice/delete": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "房间"
+                ],
+                "summary": "删除指定群公告",
+                "parameters": [
+                    {
+                        "description": "请求参数",
+                        "name": "req",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat_sdk.DeletedRRoomNoticeReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/response.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/room/notice/list": {
             "post": {
                 "security": [
@@ -2805,6 +2843,20 @@ const docTemplate = `{
                 "title": {
                     "type": "string",
                     "example": "公告标题"
+                }
+            }
+        },
+        "chat_sdk.DeletedRRoomNoticeReq": {
+            "type": "object",
+            "required": [
+                "room_ids"
+            ],
+            "properties": {
+                "room_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
                 }
             }
         },
@@ -3947,6 +3999,9 @@ const docTemplate = `{
                 },
                 "is_muted": {
                     "type": "boolean"
+                },
+                "muted_until": {
+                    "type": "string"
                 },
                 "nickname": {
                     "type": "string"

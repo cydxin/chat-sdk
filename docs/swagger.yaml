@@ -52,6 +52,15 @@ definitions:
     - content
     - room_id
     type: object
+  chat_sdk.DeletedRRoomNoticeReq:
+    properties:
+      room_ids:
+        items:
+          type: integer
+        type: array
+    required:
+    - room_ids
+    type: object
   chat_sdk.ForwardMessageReq:
     properties:
       comment:
@@ -833,6 +842,8 @@ definitions:
         type: string
       is_muted:
         type: boolean
+      muted_until:
+        type: string
       nickname:
         type: string
       remark:
@@ -2276,6 +2287,29 @@ paths:
       security:
       - BearerAuth: []
       summary: 发布群公告
+      tags:
+      - 房间
+  /room/notice/delete:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求参数
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/chat_sdk.DeletedRRoomNoticeReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/response.Response'
+      security:
+      - BearerAuth: []
+      summary: 删除指定群公告
       tags:
       - 房间
   /room/notice/list:

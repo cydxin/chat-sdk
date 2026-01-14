@@ -626,24 +626,21 @@ func (s *RoomService) SetUserMute(operatorID, roomID, targetUserID uint64, durat
 		return err
 	}
 	if operatorRole < 1 {
-		return errors.New("permission denied")
+		return errors.New("没有权限")
 	}
 
-	// Check target role (optional: admin cannot mute owner, etc. but for now simple check)
-	// Usually admin cannot mute other admins or owner.
 	targetRole, err := s.getMemberRole(roomID, targetUserID)
 	if err == nil && targetRole >= operatorRole {
-		return errors.New("permission denied: cannot mute user with equal or higher role")
+		return errors.New("权限被拒：无法禁言同等或更高角色的用户")
 	}
 
 	updates := map[string]interface{}{
-		"is_muted":    false,
+		"is_muted":    true,
 		"muted_until": nil,
 	}
 
 	if durationMinutes > 0 {
 		t := time.Now().Add(time.Duration(durationMinutes) * time.Minute)
-		updates["is_muted"] = true
 		updates["muted_until"] = &t
 	}
 
@@ -672,8 +669,6 @@ func (s *RoomService) CancelUserMute(operatorID, roomID, targetUserID uint64) er
 	return s.SetUserMute(operatorID, roomID, targetUserID, 0)
 }
 
-// -------------------- 群成员列表（Member List） --------------------
-
 // -------------------- 群昵称（我在群里的昵称） --------------------
 
 // SetMyGroupNickname 设置当前用户在指定群聊里的昵称（room_user.nickname）
@@ -698,15 +693,16 @@ func (s *RoomService) SetMyGroupNickname(userID, roomID uint64, nickname string)
 // RoomMemberListItemDTO 群成员列表项
 // display_name 按优先级：好友备注 > 群昵称 > 用户昵称 > 用户名
 type RoomMemberListItemDTO struct {
-	UserID      uint64 `json:"user_id"`
-	Username    string `json:"username"`
-	Nickname    string `json:"nickname"`
-	Remark      string `json:"remark"`         // 好友备注（当前用户视角）
-	GroupNick   string `json:"group_nickname"` // 群昵称（room_user.nickname）
-	DisplayName string `json:"display_name"`
-	Avatar      string `json:"avatar"`
-	Role        uint8  `json:"role"`
-	IsMuted     bool   `json:"is_muted"`
+	UserID      uint64     `json:"user_id"`
+	Username    string     `json:"username"`
+	Nickname    string     `json:"nickname"`
+	Remark      string     `json:"remark"`         // 好友备注（当前用户视角）
+	GroupNick   string     `json:"group_nickname"` // 群昵称（room_user.nickname）
+	DisplayName string     `json:"display_name"`
+	Avatar      string     `json:"avatar"`
+	Role        uint8      `json:"role"`
+	IsMuted     bool       `json:"is_muted"`
+	MutedUntil  *time.Time `json:"muted_until"`
 }
 
 // GetRoomMemberList 获取房间成员列表（展示名按：备注 > 群昵称 > 昵称 > 用户名）
@@ -748,14 +744,15 @@ func (s *RoomService) GetRoomMemberList(roomID uint64, viewerUserID uint64) ([]R
 	for _, ru := range roomUsers {
 		u := ru.User
 		item := RoomMemberListItemDTO{
-			UserID:    ru.UserID,
-			Username:  u.Username,
-			Nickname:  u.Nickname,
-			Remark:    remarkMap[ru.UserID],
-			GroupNick: ru.Nickname,
-			Avatar:    u.Avatar,
-			Role:      ru.Role,
-			IsMuted:   ru.IsMuted,
+			UserID:     ru.UserID,
+			Username:   u.Username,
+			Nickname:   u.Nickname,
+			Remark:     remarkMap[ru.UserID],
+			GroupNick:  ru.Nickname,
+			Avatar:     u.Avatar,
+			Role:       ru.Role,
+			IsMuted:    ru.IsMuted,
+			MutedUntil: ru.MutedUntil,
 		}
 
 		// display_name 优先级：备注 > 群昵称 > 用户昵称 > 用户名

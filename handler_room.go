@@ -291,7 +291,7 @@ func (c *ChatEngine) GinHandleGetRoomMemberList(ctx *gin.Context) {
 	roomIDStr := ctx.Query("room_id")
 	rid, err := strconv.ParseUint(roomIDStr, 10, 64)
 	if err != nil || rid == 0 {
-		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, "invalid room_id"))
+		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, "不存在的房间"))
 		return
 	}
 
@@ -733,4 +733,35 @@ func (c *ChatEngine) GinHandleListRoomNotices(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, response.Success(list))
+}
+
+type DeletedRRoomNoticeReq struct {
+	RoomIDS []uint64 `json:"room_ids" binding:"required" `
+}
+
+// GinHandleDeleteRoomNotices 删除群公告
+// @Summary 删除指定群公告
+// @Tags 房间
+// @Accept json
+// @Produce json
+// @Param req body DeletedRRoomNoticeReq true "请求参数"
+// @Success 200 {object} response.Response{}
+// @Security BearerAuth
+// @Router /room/notice/delete [post]
+func (c *ChatEngine) GinHandleDeleteRoomNotices(ctx *gin.Context) {
+	var req DeletedRRoomNoticeReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, response.Error(response.CodeParamError, err.Error()))
+		return
+	}
+	if c.RoomNoticeService == nil {
+		ctx.JSON(http.StatusOK, response.Error(response.CodeInternalError, "房间通知服务未开启"))
+		return
+	}
+	err := c.RoomNoticeService.DeleteNotices(req.RoomIDS)
+	if err != nil {
+		ctx.JSON(http.StatusOK, response.Error(response.CodeInternalError, err.Error()))
+		return
+	}
+	ctx.JSON(http.StatusOK, nil)
 }

@@ -108,6 +108,18 @@ func (s *RoomNoticeService) ListNotices(roomID uint64, limit int) ([]RoomNoticeD
 	return out, nil
 }
 
+// DeleteNotices 删除群公告。
+func (s *RoomNoticeService) DeleteNotices(roomIDS []uint64) error {
+	if len(roomIDS) == 0 {
+		return nil
+	}
+	if err := s.DB.Where("room_id IN ?", roomIDS).
+		Delete(&models.RoomNotice{}).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
 func getMemberRole(db *gorm.DB, roomID, userID uint64) (int, error) {
 	type roleRow struct{ Role uint8 }
 	var r roleRow
