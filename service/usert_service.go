@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cydxin/chat-sdk/models"
+	"github.com/cydxin/chat-sdk/repository"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -16,7 +17,7 @@ import (
 
 type UserService struct {
 	*Service
-	userDao           *models.UserDAO
+	userDao           *repository.UserDAO
 	tokenService      *TokenService
 	verifyCodeService *VerifyCodeService
 	loginTokenTTL     time.Duration
@@ -26,7 +27,7 @@ func NewUserService(s *Service) *UserService {
 	log.Println("NewUserService")
 	return &UserService{
 		Service:           s,
-		userDao:           models.NewUserDAO(s.DB),
+		userDao:           repository.NewUserDAO(s.DB),
 		tokenService:      NewTokenService(s.RDB),
 		verifyCodeService: NewVerifyCodeService(s.RDB),
 		loginTokenTTL:     7 * 24 * time.Hour,
@@ -215,6 +216,7 @@ func (s *UserService) Register(ctx context.Context, req RegisterReq) error {
 		UID:       uuid.New().String(),
 		Username:  username,
 		Nickname:  nickName,
+		Avatar:    "upload/auto_avatar/default.png",
 		Password:  string(hash),
 		Phone:     strings.TrimSpace(req.Phone),
 		Email:     normalizeEmail(req.Email),

@@ -11,6 +11,7 @@ type Req struct {
 
 type Extra struct {
 	MessageID      uint64        `json:"message_id,omitempty"`      // 被引用的消息 ID
+	MessageType    uint8         `json:"message_type,omitempty"`    // 前端使用的类型
 	UserID         uint64        `json:"user_id,omitempty"`         // 相关用户 ID
 	MessageContent string        `json:"message_content,omitempty"` // 被引用的消息内容
 	MentionedUsers []uint64      `json:"mentioned_users,omitempty"` // 被@的用户列表

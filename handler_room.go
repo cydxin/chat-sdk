@@ -736,7 +736,8 @@ func (c *ChatEngine) GinHandleListRoomNotices(ctx *gin.Context) {
 }
 
 type DeletedRRoomNoticeReq struct {
-	RoomIDS []uint64 `json:"room_ids" binding:"required" `
+	RoomID    uint64   `json:"room_id" binding:"required" `
+	NoticeIDS []uint64 `json:"notice_ids" binding:"required" `
 }
 
 // GinHandleDeleteRoomNotices 删除群公告
@@ -758,10 +759,11 @@ func (c *ChatEngine) GinHandleDeleteRoomNotices(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, response.Error(response.CodeInternalError, "房间通知服务未开启"))
 		return
 	}
-	err := c.RoomNoticeService.DeleteNotices(req.RoomIDS)
+	err := c.RoomNoticeService.DeleteNotices(req.NoticeIDS, req.RoomID)
 	if err != nil {
 		ctx.JSON(http.StatusOK, response.Error(response.CodeInternalError, err.Error()))
 		return
 	}
-	ctx.JSON(http.StatusOK, nil)
+	ctx.JSON(http.StatusOK, response.Success(nil))
+
 }

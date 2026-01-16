@@ -92,7 +92,14 @@ func (c *ChatEngine) bindWsHandlersOnMessage() {
 			log.Printf("Failed to get room members: %v", err)
 			return
 		}
-		_ = Instance.ConversationService.SetConversationVisible(room.ID)
+
+		// 打开/恢复会话：发送新消息时，可能有人之前隐藏/删除了会话（is_visible=false 或记录缺失）。
+		// 这里按“当前房间成员”维度确保会话存在且可见。
+		// 注意：GetRoomMembers 理论上包含 sender；这里仍做一次兜底。
+		needOpen := append([]uint64{}, members...)
+		needOpen = append(needOpen, senderID)
+		_ = Instance.ConversationService.EnsureRoomConversationsVisible(room.ID, needOpen)
+
 		resp := struct {
 			Type           string          `json:"type"`
 			PacketID       string          `json:"packet_id"`
@@ -134,7 +141,11 @@ func sendWsError(userID uint64, msg string, packetID ...string) {
 	if Instance == nil || Instance.WsServer == nil {
 		return
 	}
-	payload := map[string]any{"type": "error", "message": msg, "packet_id": packetID[0]}
+	pid := ""
+	if len(packetID) > 0 {
+		pid = packetID[0]
+	}
+	payload := map[string]any{"type": "error", "message": msg, "packet_id": pid}
 	b, _ := json.Marshal(payload)
 	Instance.WsServer.SendToUser(userID, b)
 }

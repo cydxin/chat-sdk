@@ -109,11 +109,11 @@ func (s *RoomNoticeService) ListNotices(roomID uint64, limit int) ([]RoomNoticeD
 }
 
 // DeleteNotices 删除群公告。
-func (s *RoomNoticeService) DeleteNotices(roomIDS []uint64) error {
-	if len(roomIDS) == 0 {
+func (s *RoomNoticeService) DeleteNotices(noticeIDS []uint64, roomID uint64) error {
+	if len(noticeIDS) == 0 {
 		return nil
 	}
-	if err := s.DB.Where("room_id IN ?", roomIDS).
+	if err := s.DB.Where("id IN ? and room_id = ?", noticeIDS, roomID).
 		Delete(&models.RoomNotice{}).Error; err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"path/filepath"
 	"strconv"
 
 	"github.com/cydxin/chat-sdk"
@@ -24,6 +25,14 @@ func main() {
 		chat_sdk.WithDB(db),
 		//chat_sdk.WithRDB(), // 配置 Redis
 		chat_sdk.WithTablePrefix("chat_"), // 自定义表前缀
+
+		// 群头像合成（可不配 OutputDir：默认会用“可执行文件所在目录/uploads/auto_avatar”）
+		// 如果你想固定到项目目录（开发环境 go run 常用），可以显式配置：
+		chat_sdk.WithGroupAvatarMergeConfig(chat_sdk.GroupAvatarMergeConfig{
+			Enabled:   true,
+			OutputDir: filepath.Join(".", "uploads", "auto_avatar"),
+			URLPrefix: "uploads/auto_avatar",
+		}),
 	)
 
 	// 3. 创建 Gin 路由

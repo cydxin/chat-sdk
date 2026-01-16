@@ -19,7 +19,7 @@ const (
 	EventMergeForward   = "merge_forward"   // 群管理员设置
 	EventNotification   = "notification"    // 群检测到禁言倒计时结束
 	EventFriendDeleted  = "friend_deleted"  // 群定时禁言
-	EventRecall         = "recall"          // 群用户禁言
+	EventRecall         = "recall"          // 消息回撤操作等
 	EventFriendRejected = "friend_rejected" // 群用户添加
 	EventFriendRequest  = "friend_request"  // 群用户移除(踢出去)
 	EventFriendAccepted = "friend_accepted" // 群用户移除(踢出去)

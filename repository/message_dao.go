@@ -1,8 +1,9 @@
-package models
+package repository
 
 import (
 	"errors"
 
+	"github.com/cydxin/chat-sdk/models"
 	"gorm.io/gorm"
 )
 
@@ -17,13 +18,13 @@ func NewMessageDAO(db *gorm.DB) *MessageDAO {
 }
 
 // Create 创建消息
-func (dao *MessageDAO) Create(msg *Message) error {
+func (dao *MessageDAO) Create(msg *models.Message) error {
 	return dao.db.Create(msg).Error
 }
 
 // FindByID 根据ID查找消息
-func (dao *MessageDAO) FindByID(id uint64) (*Message, error) {
-	var msg Message
+func (dao *MessageDAO) FindByID(id uint64) (*models.Message, error) {
+	var msg models.Message
 	err := dao.db.Where("id = ?", id).First(&msg).Error
 	if err != nil {
 		return nil, err
@@ -32,8 +33,8 @@ func (dao *MessageDAO) FindByID(id uint64) (*Message, error) {
 }
 
 // FindByRoomID 获取房间消息列表
-func (dao *MessageDAO) FindByRoomID(roomID uint64, limit, offset int) ([]Message, error) {
-	var messages []Message
+func (dao *MessageDAO) FindByRoomID(roomID uint64, limit, offset int) ([]models.Message, error) {
+	var messages []models.Message
 	err := dao.db.Where("room_id = ?", roomID).
 		Order("created_at DESC").
 		Limit(limit).
@@ -44,23 +45,23 @@ func (dao *MessageDAO) FindByRoomID(roomID uint64, limit, offset int) ([]Message
 
 // UpdateStatus 更新消息状态
 func (dao *MessageDAO) UpdateStatus(id uint64, status int) error {
-	return dao.db.Model(&Message{}).Where("id = ?", id).Update("status", status).Error
+	return dao.db.Model(&models.Message{}).Where("id = ?", id).Update("status", status).Error
 }
 
 // UpdateContent 更新消息内容 (例如撤回时修改内容)
 func (dao *MessageDAO) UpdateContent(id uint64, content string) error {
-	return dao.db.Model(&Message{}).Where("id = ?", id).Update("content", content).Error
+	return dao.db.Model(&models.Message{}).Where("id = ?", id).Update("content", content).Error
 }
 
 // DeleteForUser 单删消息 (仅对指定用户不可见)
 func (dao *MessageDAO) DeleteForUser(userID, messageID uint64) error {
-	var status MessageStatus
+	var status models.MessageStatus
 	err := dao.db.Where("user_id = ? AND message_id = ?", userID, messageID).First(&status).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			status = MessageStatus{
-				UserID:    (userID),
-				MessageID: (messageID),
+			status = models.MessageStatus{
+				UserID:    userID,
+				MessageID: messageID,
 				IsDeleted: true,
 			}
 			return dao.db.Create(&status).Error
@@ -72,17 +73,17 @@ func (dao *MessageDAO) DeleteForUser(userID, messageID uint64) error {
 
 // DeleteForEveryone 双删消息 (对所有人不可见)
 func (dao *MessageDAO) DeleteForEveryone(messageID uint64) error {
-	return dao.UpdateStatus(messageID, MessageStatusBothDeleted)
+	return dao.UpdateStatus(messageID, models.MessageStatusBothDeleted)
 }
 
 // FindByRoomIDForUser 获取房间消息列表 (过滤掉用户已删除的消息)
-func (dao *MessageDAO) FindByRoomIDForUser(roomID, userID uint64, limit, offset int) ([]Message, error) {
-	var messages []Message
+func (dao *MessageDAO) FindByRoomIDForUser(roomID, userID uint64, limit, offset int) ([]models.Message, error) {
+	var messages []models.Message
 	err := dao.db.Table("message").
 		Select("message.*").
 		Joins("LEFT JOIN message_statuses ON message_statuses.message_id = message.id AND message_statuses.user_id = ?", userID).
 		Where("message.room_id = ?", roomID).
-		Where("message.status != ?", MessageStatusBothDeleted).
+		Where("message.status != ?", models.MessageStatusBothDeleted).
 		Where("message_statuses.is_deleted IS NULL OR message_statuses.is_deleted = ?", false).
 		Order("message.created_at DESC").
 		Limit(limit).

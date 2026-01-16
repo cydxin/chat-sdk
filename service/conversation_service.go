@@ -3,9 +3,10 @@ package service
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/cydxin/chat-sdk/models"
-	"gorm.io/gorm"
+	"github.com/cydxin/chat-sdk/repository"
 )
 
 // ConversationListItemDTO 会话列表项（消息列表）
@@ -19,7 +20,12 @@ type ConversationListItemDTO struct {
 	Avatar         string      `json:"avatar"`    // 私聊：对方头像；群聊：群头像
 	LastMessage    *MessageDTO `json:"last_message,omitempty"`
 	UnreadCount    uint64      `json:"unread_count"`
-	UpdatedAt      int64       `json:"updated_at"` // unix seconds for easy sort/render
+
+	// MentionMessageIDs 未读区间内命中的 @ 消息ID（message.type=8）。
+	// 数组为空表示该房间当前未读里没有 @。
+	MentionMessageIDs []uint64 `json:"mention_message_ids"`
+
+	UpdatedAt int64 `json:"updated_at"` // unix seconds for easy sort/render
 }
 
 type ConversationService struct {
@@ -34,10 +40,7 @@ func NewConversationService(s *Service) *ConversationService {
 // GetConversationList 获取当前用户的会话列表（消息列表）
 func (s *ConversationService) GetConversationList(userID uint64) ([]ConversationListItemDTO, error) {
 	var convs []models.Conversation
-	err := s.DB.Model(&models.Conversation{}).
-		Where("user_id = ? AND is_visible = ?", userID, true).
-		Order("updated_at DESC").
-		Find(&convs).Error
+	convs, err := repository.NewConversationDAO(s.DB).ListVisibleByUserID(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +121,7 @@ func (s *ConversationService) GetConversationList(userID uint64) ([]Conversation
 			sessionReads = m
 		}
 	}
-
+	log.Printf("sessionReads: %+v", sessionReads)
 	type rng struct {
 		roomID    uint64
 		lastRead  uint64
@@ -180,6 +183,27 @@ func (s *ConversationService) GetConversationList(userID uint64) ([]Conversation
 				continue
 			}
 			unreadMap[r.RoomID] = uint64(r.Cnt)
+		}
+	}
+
+	// mentionIDsByRoom：roomID -> 未读区间内的 @ 消息ID列表（type=8）
+	mentionIDsByRoom := make(map[uint64][]uint64, len(ranges))
+	if len(ranges) > 0 {
+		qidRanges := make([]repository.RoomIDRange, 0, len(ranges))
+		for _, rg := range ranges {
+			qidRanges = append(qidRanges, repository.RoomIDRange{
+				RoomID:       rg.roomID,
+				MinExclusive: rg.lastRead,
+				MaxInclusive: rg.lastMsgID,
+			})
+		}
+
+		rows, err := repository.NewMessageMentionDAO(s.DB).BatchListMentionMessageIDsInRanges(qidRanges)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			mentionIDsByRoom[row.RoomID] = append(mentionIDsByRoom[row.RoomID], row.ID)
 		}
 	}
 
@@ -246,17 +270,21 @@ func (s *ConversationService) GetConversationList(userID uint64) ([]Conversation
 			// room 被删了，跳过
 			continue
 		}
+		mids := mentionIDsByRoom[r.ID]
+		if mids == nil {
+			mids = []uint64{}
+		}
 
 		item := ConversationListItemDTO{
-			ConversationID: c.ID,
-			RoomID:         r.ID,
-			// 私聊：对方用户ID；群聊：0（下面 switch 会覆盖修正）
-			UserID:      0,
-			RoomAccount: r.RoomAccount,
-			RoomType:    r.Type,
-			UnreadCount: unreadMap[r.ID],
-			UpdatedAt:   c.UpdatedAt.Unix(),
-			LastMessage: lastMsgMap[r.ID],
+			ConversationID:    c.ID,
+			RoomID:            r.ID,
+			UserID:            0,
+			RoomAccount:       r.RoomAccount,
+			RoomType:          r.Type,
+			UnreadCount:       unreadMap[r.ID],
+			UpdatedAt:         c.UpdatedAt.Unix(),
+			LastMessage:       lastMsgMap[r.ID],
+			MentionMessageIDs: mids,
 		}
 
 		switch r.Type {
@@ -298,35 +326,27 @@ func (s *ConversationService) GetConversationList(userID uint64) ([]Conversation
 
 // EnsureConversationForRoom 确保会话存在（用于首次进入房间或发送消息时创建）
 func (s *ConversationService) EnsureConversationForRoom(userID, roomID uint64) error {
-	conv := &models.Conversation{UserID: userID, RoomID: roomID}
-	if err := s.DB.FirstOrCreate(conv, map[string]any{"user_id": userID, "room_id": roomID}).Error; err != nil {
-		return err
-	}
-	// 确保可见：如果用户曾经隐藏过会话，新消息应该自动让它重新出现在列表里
-	return s.DB.Model(&models.Conversation{}).
-		Where("user_id = ? AND room_id = ?", userID, roomID).
-		Updates(map[string]any{"is_visible": true}).Error
+	return repository.NewConversationDAO(s.DB).EnsureConversationForRoom(userID, roomID)
 }
 
 // SetConversationVisible 设置会话可见
 func (s *ConversationService) SetConversationVisible(roomID uint64) error {
-	return s.DB.Model(&models.Conversation{}).
-		Where("is_visible = 0 AND room_id = ?", roomID).
-		Updates(map[string]any{"is_visible": true}).Error
+	return repository.NewConversationDAO(s.DB).SetRoomConversationVisibleByRoomID(roomID)
 }
 
 // SoftDeleteConversation 删除会话：当前实现为 hard delete（删除记录即不展示）；如需保留记录可改为加字段。
 func (s *ConversationService) SoftDeleteConversation(userID, roomID uint64) error {
-	return s.DB.Model(&models.Conversation{}).
-		Where("user_id = ? AND room_id = ?", userID, roomID).
-		Updates(map[string]any{"is_visible": false}).Error
+	return repository.NewConversationDAO(s.DB).SoftDeleteConversation(userID, roomID)
 }
 
 // UpdateConversationLastMessage 更新会话最后一条消息（只更新当前用户视角）
 func (s *ConversationService) UpdateConversationLastMessage(userID, roomID, messageID uint64) error {
-	res := s.DB.Model(&models.Conversation{}).
-		Where("user_id = ? AND room_id = ?", userID, roomID).
-		Updates(map[string]any{"last_message_id": messageID}).
-		Update("updated_at", gorm.Expr("NOW()"))
-	return res.Error
+	// 仍保留 gorm.ErrRecordNotFound 的语义：DAO 内部对 0 值直接忽略
+	return repository.NewConversationDAO(s.DB).UpdateLastMessageIDByUserRoom(userID, roomID, messageID, time.Time{})
+}
+
+// EnsureRoomConversationsVisible 确保指定房间在这些用户维度下的会话存在且可见。
+// 场景：WS 收到新消息时，把被隐藏/删除（is_visible=false 或记录缺失）的会话重新打开。
+func (s *ConversationService) EnsureRoomConversationsVisible(roomID uint64, userIDs []uint64) error {
+	return repository.NewConversationDAO(s.DB).EnsureConversationsVisibleBulk(roomID, userIDs, time.Now())
 }

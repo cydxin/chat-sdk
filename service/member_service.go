@@ -10,6 +10,7 @@ import (
 
 	"github.com/cydxin/chat-sdk/cons"
 	"github.com/cydxin/chat-sdk/models"
+	"github.com/cydxin/chat-sdk/repository"
 	"gorm.io/gorm"
 )
 
@@ -592,17 +593,20 @@ func (s *MemberService) AddRoomMember(roomID uint64, userIDs []uint64, operatorI
 	now := time.Now()
 	rows := make([]models.RoomUser, 0, len(toAdd))
 
-	// 批量获取用户头像/昵称（优先在线缓存，未命中再查库）
-	briefMap, err := models.NewUserDAO(s.DB).BatchGetUserBriefsPreferOnline(toAdd, func(userID uint64) (models.UserBrief, bool, error) {
+	// 不改变dao 内部的情况下用各自的获取
+	fn := func(userID uint64) (repository.UserBrief, bool, error) {
 		if s.OnlineUserGetter == nil {
-			return models.UserBrief{}, false, nil
+			return repository.UserBrief{}, false, nil
 		}
 		nn, av, ok := s.OnlineUserGetter(userID)
 		if !ok {
-			return models.UserBrief{}, false, nil
+			return repository.UserBrief{}, false, nil
 		}
-		return models.UserBrief{UserID: userID, Nickname: nn, Avatar: av}, true, nil
-	})
+		return repository.UserBrief{UserID: userID, Nickname: nn, Avatar: av}, true, nil
+	}
+
+	// 批量获取用户头像/昵称（优先在线缓存，未命中再查库）
+	briefMap, err := repository.NewUserDAO(s.DB).BatchGetUserBriefsPreferOnline(toAdd, fn)
 	if err != nil {
 		return err
 	}

@@ -84,20 +84,30 @@ func (s *NotificationService) PublishRoomEvent(roomID, actorID uint64, eventType
 			clean = append(clean, actorID)
 		}
 	}
-	switch eventType {
-	case cons.EventRoomMemberRemoved:
-		// 把移除的人也放进通知里
-		var removeID uint64
-		tmp := payload.(map[string]interface{})
+	// 默认把 payload 里的 user_id 也放进通知里
+	var removeID uint64
+	tmp, ok := payload.(map[string]interface{})
+	if ok {
 		if v, ok := tmp["user_id"]; ok {
 			removeID = v.(uint64)
 			clean = append(clean, removeID)
 		}
-	case cons.EventRoomMemberQuit:
-		// 自己退出的话
-
-	default:
 	}
+
+	//switch eventType {
+	//case cons.EventRoomMemberRemoved:
+	//	// 把移除的人也放进通知里
+	//	var removeID uint64
+	//	tmp := payload.(map[string]interface{})
+	//	if v, ok := tmp["user_id"]; ok {
+	//		removeID = v.(uint64)
+	//		clean = append(clean, removeID)
+	//	}
+	//case cons.EventRoomMemberQuit:
+	//	// 自己退出的话
+	//
+	//default:
+	//}
 
 	rows := make([]models.RoomNotificationDelivery, 0, len(clean))
 	for _, uid := range clean {

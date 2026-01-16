@@ -9,6 +9,7 @@ import (
 	"github.com/cydxin/chat-sdk/cons"
 	"github.com/cydxin/chat-sdk/message"
 	"github.com/cydxin/chat-sdk/models"
+	"github.com/cydxin/chat-sdk/repository"
 	"gorm.io/datatypes"
 	"gorm.io/gorm/clause"
 )
@@ -129,14 +130,14 @@ func toMessageListItemDTOs(msgs []models.Message) []MessageListItemDTO {
 
 type MessageService struct {
 	*Service
-	messageDAO *models.MessageDAO
+	messageDAO *repository.MessageDAO
 	// SessionBootstrap 用于 WS 建连时加载会话已读游标（由 engine 注入）
 	SessionBootstrap *SessionBootstrapService
 }
 
 func NewMessageService(s *Service) *MessageService {
 	log.Println("NewMessageService")
-	return &MessageService{Service: s, messageDAO: models.NewMessageDAO(s.DB), SessionBootstrap: s.SessionBootstrap}
+	return &MessageService{Service: s, messageDAO: repository.NewMessageDAO(s.DB), SessionBootstrap: s.SessionBootstrap}
 }
 
 // SaveMessage 保存消息到数据库
@@ -380,7 +381,7 @@ func (s *MessageService) RecallMessages(messageIDs []uint64, userID uint64, reca
 	}
 
 	// 通知：撤回/双删才通知（单删不打扰）
-	needNotify := recallType == models.MessageStatusRecalled || recallType == models.MessageStatusBothDeleted
+	needNotify := recallType == models.MessageStatusRecalled || recallType == models.MessageStatusBothDeleted || recallType == models.MessageStatusMangerDeleted
 	if needNotify {
 		// 按 room 聚合 message_ids
 		roomToMsgIDs := make(map[uint64][]uint64)
@@ -442,7 +443,7 @@ func (s *MessageService) GetRoomMessagesDTO(roomID uint64, limit, messID int) ([
 	//err
 	query := s.DB.Model(&models.Message{}).
 		Preload("Sender").
-		Where("room_id = ?", roomID)
+		Where("room_id = ? and status <= 3", roomID)
 	if messID > 0 {
 		query = query.Where("id < ?", messID)
 	}

@@ -54,12 +54,15 @@ definitions:
     type: object
   chat_sdk.DeletedRRoomNoticeReq:
     properties:
-      room_ids:
+      notice_ids:
         items:
           type: integer
         type: array
+      room_id:
+        type: integer
     required:
-    - room_ids
+    - notice_ids
+    - room_id
     type: object
   chat_sdk.ForwardMessageReq:
     properties:

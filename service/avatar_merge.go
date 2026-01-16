@@ -19,8 +19,8 @@ import (
 )
 
 // MergeAvatarsConfig 合成群头像配置。
-// 说明：本项目没有对象存储/静态资源服务的统一约束，因此这里默认落盘到 outputDir，返回一个 file:// URL。
-// 如果你有 CDN/OSS，可把 outputDir 替换成上传逻辑，然后返回远程 URL。
+// 说明：本项目没有对象存储/静态资源服务的统一约束，因此这里默认落盘到 outputDir，返回一个 file:// URL，然后获取这个文件流
+// 可把 outputDir 替换成上传逻辑，然后返回远程 URL,实现oss
 type MergeAvatarsConfig struct {
 	CanvasSize int           // 画布大小（正方形，像素）
 	Padding    int           // 外边距
@@ -28,10 +28,23 @@ type MergeAvatarsConfig struct {
 	Timeout    time.Duration // 下载头像超时
 	OutputDir  string        // 输出目录（为空则使用 os.TempDir()/chat-sdk-avatars）
 
+	// LocalPathRoot 用于解析非 http(s) 的相对路径头像（例如 DB 里存 uploads/2026/...）。
+	// - 为空：保持 best-effort（先按当前进程工作目录打开；失败后再尝试用 OutputDir 的父目录兜底）
+	// - 非空：会优先用 filepath.Join(LocalPathRoot, url) 读取。
+	LocalPathRoot string
+
 	// URLPrefix 写库/对外访问前缀：
 	// - 为空：默认使用 OutputDir 作为前缀（会移除 file://，并去掉前导 /，生成相对路径）
 	// - 非空：直接用该前缀拼 filename（会自动处理斜杠）
 	URLPrefix string
+
+	// Headers 访问头像 URL 时附带的请求头（可用于私有 CDN、鉴权网关等）。
+	Headers map[string]string
+	// UserAgent 访问头像 URL 时使用的 UA（部分图床会拒绝空 UA）。
+	UserAgent string
+
+	// FailIfAllFetchFailed 当所有头像都拉取失败时，直接返回 error（避免“全灰但成功”）。
+	FailIfAllFetchFailed bool
 }
 
 func (c MergeAvatarsConfig) withDefaults() MergeAvatarsConfig {
@@ -86,12 +99,27 @@ func MergeMembersAvatar(avatarURLs []string, cfg MergeAvatarsConfig) (*MergeAvat
 
 	imgs := make([]image.Image, 0, len(urls))
 	client := &http.Client{Timeout: cfg.Timeout}
+
+	fetchFailed := 0
+	var lastFetchErr error
 	for _, u := range urls {
-		img, _ := fetchAvatarImage(client, u)
+		img, err := fetchAvatarImage(client, u, cfg)
+		if err != nil {
+			// 保留错误，用于“全失败”场景抛出，避免静默全灰。
+			lastFetchErr = err
+			fetchFailed++
+		}
 		if img == nil {
 			img = placeholderImage(128, 128)
 		}
 		imgs = append(imgs, img)
+	}
+
+	if cfg.FailIfAllFetchFailed && len(urls) > 0 && fetchFailed == len(urls) {
+		if lastFetchErr != nil {
+			return nil, fmt.Errorf("all avatar fetch failed: %w", lastFetchErr)
+		}
+		return nil, fmt.Errorf("all avatar fetch failed")
 	}
 
 	canvas := image.NewRGBA(image.Rect(0, 0, cfg.CanvasSize, cfg.CanvasSize))
@@ -177,17 +205,63 @@ func calcWeChatLikeGrid(n int) gridLayout {
 	return gridLayout{rows: 3, cols: 3}
 }
 
-func fetchAvatarImage(client *http.Client, url string) (image.Image, error) {
-	if strings.TrimSpace(url) == "" {
+func fetchAvatarImage(client *http.Client, url string, cfg MergeAvatarsConfig) (image.Image, error) {
+	url = strings.TrimSpace(url)
+	if url == "" {
 		return nil, nil
 	}
 
-	// 目前仅支持 http(s)；如要支持 file:// 可在此扩展
+	// 支持 file:// 以及本地路径（常见：DB 里存的是 uploads/xxx.png 或磁盘绝对路径）。
+	if strings.HasPrefix(url, "file://") {
+		p := strings.TrimPrefix(url, "file://")
+		p = strings.TrimPrefix(p, "/") // 兼容 file:///C:/...
+		p = strings.ReplaceAll(p, "/", "\\")
+		return decodeImageFromFile(p)
+	}
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		return nil, fmt.Errorf("unsupported avatar url: %s", url)
+		// 非 http(s)：优先按 LocalPathRoot 解析相对路径
+		if root := strings.TrimSpace(cfg.LocalPathRoot); root != "" && !filepath.IsAbs(url) {
+			cand := filepath.Join(root, filepath.FromSlash(url))
+			if img, err := decodeImageFromFile(cand); err == nil && img != nil {
+				return img, nil
+			}
+		}
+
+		// best-effort 当作本地路径处理：
+		// 1) 先按原样打开（支持绝对路径 / 当前工作目录相对路径）
+		if img, err := decodeImageFromFile(url); err == nil && img != nil {
+			return img, nil
+		}
+		// 2) 再尝试把相对路径（如 uploads/2026/...）解析到 OutputDir 的父目录下
+		//    典型部署：OutputDir = <project>/uploads/auto_avatar，那么父目录就是 <project>，拼上 uploads/... 即可。
+		if !filepath.IsAbs(url) {
+			base := strings.TrimSpace(cfg.OutputDir)
+			if base == "" {
+				base = os.TempDir()
+			}
+			cand := filepath.Join(filepath.Dir(base), filepath.FromSlash(url))
+			return decodeImageFromFile(cand)
+		}
+		return decodeImageFromFile(url)
 	}
 
-	resp, err := client.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	ua := strings.TrimSpace(cfg.UserAgent)
+	if ua != "" {
+		req.Header.Set("User-Agent", ua)
+	}
+	for k, v := range cfg.Headers {
+		kk := strings.TrimSpace(k)
+		if kk == "" {
+			continue
+		}
+		req.Header.Set(kk, v)
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +269,33 @@ func fetchAvatarImage(client *http.Client, url string) (image.Image, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("fetch avatar failed: %s", resp.Status)
 	}
+
+	// 先读一小段判断 Content-Type，避免 HTML/JSON 错误页导致 decode 行为不明确。
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
+	if err != nil {
+		return nil, err
+	}
+	ct := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
+	if ct != "" && !strings.HasPrefix(ct, "image/") {
+		// 有些 CDN 不带 content-type，这里只有在“明确不是 image”时才报错。
+		return nil, fmt.Errorf("fetch avatar content-type not image: %s", ct)
+	}
+
+	img, _, err := image.Decode(bytes.NewReader(data))
+	return img, err
+}
+
+func decodeImageFromFile(path string) (image.Image, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, 10<<20))
 	if err != nil {
 		return nil, err
 	}

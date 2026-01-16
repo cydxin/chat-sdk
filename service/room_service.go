@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cydxin/chat-sdk/cons"
@@ -45,6 +47,67 @@ func (s *RoomService) CreateGroupRoom(name string, creator uint64, members []uin
 		return nil, err
 	}
 
+	// 创建群后：发布“成员加入”事件（尽力而为：落库 + WS）
+	// 约定：user_ids 为新增成员展示信息列表（与 AddRoomMember 一致）
+	if s.Notify != nil {
+		// 组装最终成员：creator + members（去重）
+		seen := make(map[uint64]struct{}, len(members)+1)
+		allMemberIDs := make([]uint64, 0, len(members)+1)
+		addIDs := make([]uint64, 0, len(members)+1)
+
+		if creator > 0 {
+			seen[creator] = struct{}{}
+			allMemberIDs = append(allMemberIDs, creator)
+			addIDs = append(addIDs, creator)
+		}
+		for _, uid := range members {
+			if uid == 0 {
+				continue
+			}
+			if _, ok := seen[uid]; ok {
+				continue
+			}
+			seen[uid] = struct{}{}
+			allMemberIDs = append(allMemberIDs, uid)
+			addIDs = append(addIDs, uid)
+		}
+
+		// 批量取头像/昵称
+		type brief struct {
+			ID       uint64
+			Nickname string
+			Avatar   string
+		}
+		var bs []brief
+		_ = s.DB.Model(&models.User{}).
+			Select("id, nickname, avatar").
+			Where("id IN ?", addIDs).
+			Scan(&bs).Error
+
+		toAddUserInfo := make([]map[string]interface{}, 0, len(addIDs))
+		briefMap := make(map[uint64]brief, len(bs))
+		for _, b := range bs {
+			briefMap[b.ID] = b
+		}
+		for _, uid := range addIDs {
+			b := briefMap[uid]
+			toAddUserInfo = append(toAddUserInfo, map[string]interface{}{
+				"user_id":  uid,
+				"nickname": b.Nickname,
+				"avatar":   b.Avatar,
+			})
+		}
+
+		_, _ = s.Notify.PublishRoomEvent(
+			room.ID,
+			creator,
+			cons.EventRoomMemberAdded,
+			map[string]any{"user_ids": toAddUserInfo},
+			allMemberIDs,
+			true,
+		)
+	}
+
 	// 自动生成群头像（取自己 + 前8个成员）
 	cfg := MergeAvatarsConfig{}
 	if s.GroupAvatarMergeConfig != nil {
@@ -57,6 +120,11 @@ func (s *RoomService) CreateGroupRoom(name string, creator uint64, members []uin
 		cfg.Timeout = s.GroupAvatarMergeConfig.Timeout
 		cfg.OutputDir = s.GroupAvatarMergeConfig.OutputDir
 		cfg.URLPrefix = s.GroupAvatarMergeConfig.URLPrefix
+
+		// 头像字段是相对路径（uploads/xxx）时，用 OutputDir 的父目录当作项目根来拼接。
+		if strings.TrimSpace(cfg.LocalPathRoot) == "" && strings.TrimSpace(cfg.OutputDir) != "" {
+			cfg.LocalPathRoot = filepath.Dir(cfg.OutputDir)
+		}
 	}
 	memberIDs := make([]uint64, 0, 9)
 	memberIDs = append(memberIDs, creator)
@@ -109,12 +177,27 @@ func (s *RoomService) createRoom(roomType uint8, name string, creator uint64, me
 	tx := s.DB.Begin()
 	defer tx.Rollback()
 
+	// 先插入群主再去重成员，避免导致插入重复
+	members = append(members, creator)
+	seen := make(map[uint64]struct{}, len(members))
+	uniq := make([]uint64, 0, len(members))
+	for _, uid := range members {
+		if uid == 0 {
+			continue
+		}
+		if _, ok := seen[uid]; ok {
+			continue
+		}
+		seen[uid] = struct{}{}
+		uniq = append(uniq, uid)
+	}
+
 	if err := tx.Create(room).Error; err != nil {
 		return nil, err
 	}
-	members = append(members, creator)
+
 	// 添加房间成员
-	for _, uid := range members {
+	for _, uid := range uniq {
 		member := &models.RoomUser{
 			RoomID:    room.ID,
 			UserID:    uid,
@@ -126,6 +209,7 @@ func (s *RoomService) createRoom(roomType uint8, name string, creator uint64, me
 		if uid == creator {
 			member.Role = 2 // 群主
 		}
+		log.Printf("创建群 %d", uid)
 		if err := tx.Create(member).Error; err != nil {
 			return nil, err
 		}
@@ -133,19 +217,6 @@ func (s *RoomService) createRoom(roomType uint8, name string, creator uint64, me
 
 	// 同步创建会话：确保成员创建房间后会话列表立即可见
 	{
-		// 去重成员，避免 creator 重复 append 导致插入重复
-		seen := make(map[uint64]struct{}, len(members))
-		uniq := make([]uint64, 0, len(members))
-		for _, uid := range members {
-			if uid == 0 {
-				continue
-			}
-			if _, ok := seen[uid]; ok {
-				continue
-			}
-			seen[uid] = struct{}{}
-			uniq = append(uniq, uid)
-		}
 
 		now := time.Now()
 		for _, uid := range uniq {
@@ -643,6 +714,11 @@ func (s *RoomService) SetUserMute(operatorID, roomID, targetUserID uint64, durat
 		t := time.Now().Add(time.Duration(durationMinutes) * time.Minute)
 		updates["muted_until"] = &t
 	}
+	if durationMinutes < 0 {
+		updates["is_muted"] = false
+		updates["muted_until"] = nil
+
+	}
 
 	if err := s.DB.Model(&models.RoomUser{}).
 		Where("room_id = ? AND user_id = ?", roomID, targetUserID).
@@ -666,7 +742,7 @@ func (s *RoomService) SetUserMute(operatorID, roomID, targetUserID uint64, durat
 
 // CancelUserMute 取消指定用户禁言
 func (s *RoomService) CancelUserMute(operatorID, roomID, targetUserID uint64) error {
-	return s.SetUserMute(operatorID, roomID, targetUserID, 0)
+	return s.SetUserMute(operatorID, roomID, targetUserID, -1)
 }
 
 // -------------------- 群昵称（我在群里的昵称） --------------------

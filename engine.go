@@ -3,6 +3,7 @@ package chat_sdk
 import (
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,6 +51,15 @@ func NewEngine(opts ...Option) *ChatEngine {
 		}
 		for _, opt := range opts {
 			opt(c)
+		}
+
+		// 当用户未配置时，会自动衍生组头像合并路径。
+		if c.GroupAvatarMerge.Enabled {
+			log.Printf("头像模块启动.")
+			c.GroupAvatarMerge.OutputDir = defaultGroupAvatarMergeOutputDir(c.GroupAvatarMerge.OutputDir)
+			if strings.TrimSpace(c.GroupAvatarMerge.URLPrefix) == "" {
+				c.GroupAvatarMerge.URLPrefix = DefaultGroupAvatarMergeURLPrefix("")
+			}
 		}
 
 		Instance = &ChatEngine{config: c}

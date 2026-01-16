@@ -2849,14 +2849,18 @@ const docTemplate = `{
         "chat_sdk.DeletedRRoomNoticeReq": {
             "type": "object",
             "required": [
-                "room_ids"
+                "notice_ids",
+                "room_id"
             ],
             "properties": {
-                "room_ids": {
+                "notice_ids": {
                     "type": "array",
                     "items": {
                         "type": "integer"
                     }
+                },
+                "room_id": {
+                    "type": "integer"
                 }
             }
         },

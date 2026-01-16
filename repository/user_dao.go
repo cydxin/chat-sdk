@@ -1,9 +1,10 @@
-package models
+package repository
 
 import (
 	"errors"
 	"strings"
 
+	"github.com/cydxin/chat-sdk/models"
 	"gorm.io/gorm"
 )
 
@@ -16,50 +17,50 @@ func NewUserDAO(db *gorm.DB) *UserDAO {
 	return &UserDAO{db: db}
 }
 
-func (dao *UserDAO) Create(user *User) error {
+func (dao *UserDAO) Create(user *models.User) error {
 	return dao.db.Create(user).Error
 }
 
-func (dao *UserDAO) FindByID(id uint64) (*User, error) {
-	var u User
+func (dao *UserDAO) FindByID(id uint64) (*models.User, error) {
+	var u models.User
 	if err := dao.db.Where("id = ?", id).First(&u).Error; err != nil {
 		return nil, err
 	}
 	return &u, nil
 }
 
-func (dao *UserDAO) FindByUID(uid string) (*User, error) {
-	var u User
+func (dao *UserDAO) FindByUID(uid string) (*models.User, error) {
+	var u models.User
 	if err := dao.db.Where("uid = ?", uid).First(&u).Error; err != nil {
 		return nil, err
 	}
 	return &u, nil
 }
 
-func (dao *UserDAO) FindByUsername(username string) (*User, error) {
-	var u User
+func (dao *UserDAO) FindByUsername(username string) (*models.User, error) {
+	var u models.User
 	if err := dao.db.Where("username = ?", username).First(&u).Error; err != nil {
 		return nil, err
 	}
 	return &u, nil
 }
 
-func (dao *UserDAO) FindByPhone(phone string) (*User, error) {
+func (dao *UserDAO) FindByPhone(phone string) (*models.User, error) {
 	if phone == "" {
 		return nil, gorm.ErrRecordNotFound
 	}
-	var u User
+	var u models.User
 	if err := dao.db.Where("phone = ?", phone).First(&u).Error; err != nil {
 		return nil, err
 	}
 	return &u, nil
 }
 
-func (dao *UserDAO) FindByEmail(email string) (*User, error) {
+func (dao *UserDAO) FindByEmail(email string) (*models.User, error) {
 	if email == "" {
 		return nil, gorm.ErrRecordNotFound
 	}
-	var u User
+	var u models.User
 	if err := dao.db.Where("email = ?", email).First(&u).Error; err != nil {
 		return nil, err
 	}
@@ -68,7 +69,7 @@ func (dao *UserDAO) FindByEmail(email string) (*User, error) {
 
 func (dao *UserDAO) ExistsByUsername(username string) (bool, error) {
 	var count int64
-	err := dao.db.Model(&User{}).Where("username = ?", username).Count(&count).Error
+	err := dao.db.Model(&models.User{}).Where("username = ?", username).Count(&count).Error
 	return count > 0, err
 }
 
@@ -77,7 +78,7 @@ func (dao *UserDAO) ExistsByPhone(phone string) (bool, error) {
 		return false, nil
 	}
 	var count int64
-	err := dao.db.Model(&User{}).Where("phone = ?", phone).Count(&count).Error
+	err := dao.db.Model(&models.User{}).Where("phone = ?", phone).Count(&count).Error
 	return count > 0, err
 }
 
@@ -86,28 +87,28 @@ func (dao *UserDAO) ExistsByEmail(email string) (bool, error) {
 		return false, nil
 	}
 	var count int64
-	err := dao.db.Model(&User{}).Where("email = ?", email).Count(&count).Error
+	err := dao.db.Model(&models.User{}).Where("email = ?", email).Count(&count).Error
 	return count > 0, err
 }
 
 func (dao *UserDAO) UpdateAvatar(id uint64, avatar string) error {
-	return dao.db.Model(&User{}).Where("id = ?", id).Update("avatar", avatar).Error
+	return dao.db.Model(&models.User{}).Where("id = ?", id).Update("avatar", avatar).Error
 }
 
 func (dao *UserDAO) UpdateFields(id uint64, updates map[string]any) error {
 	if len(updates) == 0 {
 		return nil
 	}
-	return dao.db.Model(&User{}).Where("id = ?", id).Updates(updates).Error
+	return dao.db.Model(&models.User{}).Where("id = ?", id).Updates(updates).Error
 }
 
 func (dao *UserDAO) UpdatePassword(id uint64, hashedPassword string) error {
-	return dao.db.Model(&User{}).Where("id = ?", id).Update("password", hashedPassword).Error
+	return dao.db.Model(&models.User{}).Where("id = ?", id).Update("password", hashedPassword).Error
 }
 
 // SearchUsers 按关键字搜索用户（username/nickname/uid），可排除某个 userID。
 // 注意：返回的是完整 User 结构体（含 Password），上层请自行转 DTO/脱敏。
-func (dao *UserDAO) SearchUsers(keyword string, excludeUserID uint64, limit, offset int) ([]User, error) {
+func (dao *UserDAO) SearchUsers(keyword string, excludeUserID uint64, limit, offset int) ([]models.User, error) {
 	keyword = strings.TrimSpace(keyword)
 	if limit <= 0 {
 		limit = 20
@@ -119,7 +120,7 @@ func (dao *UserDAO) SearchUsers(keyword string, excludeUserID uint64, limit, off
 		offset = 0
 	}
 
-	q := dao.db.Model(&User{})
+	q := dao.db.Model(&models.User{})
 	if excludeUserID > 0 {
 		q = q.Where("id <> ?", excludeUserID)
 	}
@@ -128,7 +129,7 @@ func (dao *UserDAO) SearchUsers(keyword string, excludeUserID uint64, limit, off
 		q = q.Where("username LIKE ? OR nickname LIKE ? OR uid LIKE ?", like, like, like)
 	}
 
-	var users []User
+	var users []models.User
 	err := q.Order("id DESC").Limit(limit).Offset(offset).Find(&users).Error
 	return users, err
 }
@@ -137,7 +138,7 @@ func (dao *UserDAO) IsNotFound(err error) bool {
 	return errors.Is(err, gorm.ErrRecordNotFound)
 }
 
-func (dao *UserDAO) FindByAccount(account string) (*User, error) {
+func (dao *UserDAO) FindByAccount(account string) (*models.User, error) {
 	account = strings.TrimSpace(account)
 	if account == "" {
 		return nil, gorm.ErrRecordNotFound
@@ -169,7 +170,7 @@ func (dao *UserDAO) ExistsByAccount(username, phone, email string) (kind uint8, 
 	}
 
 	// 组装 OR 查询（一次 SQL 搞定）
-	q := dao.db.Model(&User{}).Select("username, phone, email")
+	q := dao.db.Model(&models.User{}).Select("username, phone, email")
 	first := true
 	if username != "" {
 		q = q.Where("username = ?", username)
@@ -195,7 +196,7 @@ func (dao *UserDAO) ExistsByAccount(username, phone, email string) (kind uint8, 
 		return 0, "", nil
 	}
 
-	var hit User
+	var hit models.User
 	if err := q.Limit(1).Take(&hit).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return 0, "", nil
@@ -275,7 +276,7 @@ func (dao *UserDAO) BatchGetUserBriefsPreferOnline(ids []uint64, onlineGetter On
 		Avatar   string
 	}
 	var rows []row
-	if err := dao.db.Model(&User{}).
+	if err := dao.db.Model(&models.User{}).
 		Select("id, nickname, avatar").
 		Where("id IN ?", miss).
 		Find(&rows).Error; err != nil {
